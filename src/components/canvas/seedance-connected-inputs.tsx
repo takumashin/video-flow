@@ -47,43 +47,41 @@ export default function SeedanceConnectedInputs({
               {refs.images.length}/{rules.maxImages}
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-3 gap-2">
             {refs.images.map(image => (
               <div
                 key={image.nodeId}
-                className="overflow-hidden rounded-md border border-violet-500/25 bg-violet-500/5"
+                className="group relative aspect-square overflow-hidden rounded-lg border border-violet-500/30 bg-violet-500/5"
               >
-                <div className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={image.imageUrl}
-                    alt={image.title}
-                    className="h-16 w-full object-cover"
-                  />
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onPointerDown={e => e.stopPropagation()}
-                    onClick={e => {
-                      e.stopPropagation()
-                      onRemoveImage(image.nodeId)
-                    }}
-                    className="nodrag absolute right-1 top-1 rounded-md bg-black/60 p-1 text-white shadow-sm transition hover:bg-red-600 disabled:opacity-50"
-                    aria-label={`移除 ${image.title}`}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                <div className="flex items-center justify-between gap-1 px-2 py-1">
-                  <span className="truncate text-[10px] font-medium text-violet-600 dark:text-violet-300">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={image.imageUrl}
+                  alt={image.title}
+                  className="h-full w-full object-cover"
+                />
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1.5 pt-4">
+                  <p className="truncate text-[10px] font-medium text-white">
                     @图片{image.index}
-                  </span>
+                  </p>
                   {showRole && (
-                    <span className="shrink-0 text-[10px] text-muted">
+                    <p className="truncate text-[9px] text-white/75">
                       {getImageRoleLabel(image.role)}
-                    </span>
+                    </p>
                   )}
                 </div>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onPointerDown={e => e.stopPropagation()}
+                  onClick={e => {
+                    e.stopPropagation()
+                    onRemoveImage(image.nodeId)
+                  }}
+                  className="nodrag absolute right-1 top-1 rounded-md bg-black/60 p-1 text-white opacity-0 shadow-sm transition hover:bg-red-600 group-hover:opacity-100 disabled:opacity-50"
+                  aria-label={`移除 ${image.title}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
             ))}
           </div>
@@ -98,40 +96,44 @@ export default function SeedanceConnectedInputs({
               {refs.videos.length}/{rules.maxVideos}
             </span>
           </div>
-          <div className="space-y-1.5">
+          <div className="grid grid-cols-3 gap-2">
             {refs.videos.map(video => (
               <div
                 key={video.nodeId}
-                className="overflow-hidden rounded-md border border-sky-500/25 bg-sky-500/5"
+                className="group relative aspect-square overflow-hidden rounded-lg border border-sky-500/30 bg-sky-500/5"
               >
-                <div className="relative">
-                  <video
-                    src={video.mediaUrl}
-                    controls
-                    playsInline
-                    className="h-20 w-full bg-black object-cover"
-                    onPointerDown={e => e.stopPropagation()}
-                  />
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onPointerDown={e => e.stopPropagation()}
-                    onClick={e => {
-                      e.stopPropagation()
-                      onRemoveVideo(video.nodeId)
-                    }}
-                    className="nodrag absolute right-1 top-1 rounded-md bg-black/60 p-1 text-white shadow-sm transition hover:bg-red-600 disabled:opacity-50"
-                    aria-label={`移除 ${video.title}`}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                <video
+                  src={video.mediaUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="h-full w-full object-cover bg-black"
+                  onPointerDown={e => e.stopPropagation()}
+                />
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="rounded-full bg-black/45 p-1.5">
+                    <FileVideo className="h-4 w-4 text-white" />
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 px-2 py-1">
-                  <FileVideo className="h-3 w-3 text-sky-500" />
-                  <span className="truncate text-[10px] font-medium text-sky-600 dark:text-sky-300">
-                    @视频{video.index} · {video.title}
-                  </span>
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1.5 pt-4">
+                  <p className="truncate text-[10px] font-medium text-white">
+                    @视频{video.index}
+                  </p>
+                  <p className="truncate text-[9px] text-white/75">{video.title}</p>
                 </div>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onPointerDown={e => e.stopPropagation()}
+                  onClick={e => {
+                    e.stopPropagation()
+                    onRemoveVideo(video.nodeId)
+                  }}
+                  className="nodrag absolute right-1 top-1 rounded-md bg-black/60 p-1 text-white opacity-0 shadow-sm transition hover:bg-red-600 group-hover:opacity-100 disabled:opacity-50"
+                  aria-label={`移除 ${video.title}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
             ))}
           </div>

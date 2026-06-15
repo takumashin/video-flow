@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react'
 import ReactFlow, {
   Background,
   BackgroundVariant,
-  ReactFlowProvider,
   SelectionMode,
   useReactFlow,
   type NodeChange,
@@ -28,8 +27,10 @@ import {
   getVideoFiles,
   type DragFileKind,
 } from '@/lib/media-upload-shared'
+import { hasAssetDrag, readAssetDragData } from '@/lib/asset-drag'
 import { validateSeedanceConnection, type ConnectionEndpoints } from '@/lib/seedance-connection-rules'
 import { snapNodePosition, type SnapGuide } from '@/lib/node-snap'
+import { useAssetLibraryStore } from '@/store/asset-library-store'
 
 const nodeTypes = { custom: CustomNode }
 const edgeTypes = { custom: CustomEdge }
@@ -110,13 +111,20 @@ function WorkflowCanvasInner() {
   }))
 
   const [fileDrag, setFileDrag] = useState<FileDragState>(EMPTY_FILE_DRAG)
+  const [assetDragActive, setAssetDragActive] = useState(false)
+  const draggingAssetKind = useAssetLibraryStore(s => s.draggingAssetKind)
+  const setDraggingAssetKind = useAssetLibraryStore(s => s.setDraggingAssetKind)
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
 
   useEffect(() => {
-    const clearFileDrag = () => setFileDrag(EMPTY_FILE_DRAG)
+    const clearFileDrag = () => {
+      setFileDrag(EMPTY_FILE_DRAG)
+      setAssetDragActive(false)
+      setDraggingAssetKind(null)
+    }
     document.addEventListener('dragend', clearFileDrag)
     return () => document.removeEventListener('dragend', clearFileDrag)
-  }, [])
+  }, [setDraggingAssetKind])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     const draggingChange = changes.find(
@@ -162,24 +170,57 @@ function WorkflowCanvasInner() {
     e.preventDefault()
     if (isRunning)
       return
+
+    if (hasAssetDrag(e.dataTransfer)) {
+      e.dataTransfer.dropEffect = 'copy'
+      setAssetDragActive(true)
+      setFileDrag(EMPTY_FILE_DRAG)
+      return
+    }
+
     const kinds = detectDragFileKinds(e.dataTransfer)
     if (kinds.length === 0)
       return
     e.dataTransfer.dropEffect = 'copy'
     setFileDrag({ active: true, kinds })
+    setAssetDragActive(false)
   }, [isRunning])
 
   const onDragLeave = useCallback((e: React.DragEvent) => {
-    if (e.currentTarget === e.target)
+    if (e.currentTarget === e.target) {
       setFileDrag(EMPTY_FILE_DRAG)
+      setAssetDragActive(false)
+    }
   }, [])
 
   const onDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     setFileDrag(EMPTY_FILE_DRAG)
+    setAssetDragActive(false)
+    setDraggingAssetKind(null)
 
     if (isRunning)
       return
+
+    const asset = readAssetDragData(e.dataTransfer)
+    if (asset) {
+      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const label = asset.kind === 'image' ? '参考图片' : asset.kind === 'video' ? '参考视频' : '参考音频'
+      if (asset.kind === 'image')
+        addImageNode(asset.url, position)
+      else if (asset.kind === 'video')
+        addVideoNode(asset.url, position)
+      else
+        addAudioNode(asset.url, position)
+
+      addLog({
+        nodeId: 'system',
+        nodeTitle: '系统',
+        message: `已从资产库拖入${label}`,
+        level: 'success',
+      })
+      return
+    }
 
     const fileList = e.dataTransfer.files
     const images = getImageFiles(fileList)
@@ -239,6 +280,9 @@ function WorkflowCanvasInner() {
           level: 'success',
         })
       }
+
+      if (images.length > 0 || videos.length > 0 || audios.length > 0)
+        useAssetLibraryStore.getState().bumpRefresh()
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '文件上传失败'
@@ -249,14 +293,30 @@ function WorkflowCanvasInner() {
         level: 'error',
       })
     }
-  }, [addAudioNode, addImageNode, addLog, addVideoNode, isRunning, screenToFlowPosition])
+  }, [addAudioNode, addImageNode, addLog, addVideoNode, isRunning, screenToFlowPosition, setDraggingAssetKind])
 
-  const overlayMessage = getDragOverlayMessage(fileDrag.kinds)
-  const overlayIcon = fileDrag.kinds.includes('video') && !fileDrag.kinds.includes('image')
-    ? FileVideo
-    : fileDrag.kinds.includes('audio') && !fileDrag.kinds.includes('image') && !fileDrag.kinds.includes('video')
-      ? FileAudio
-      : ImagePlus
+  const overlayMessage = assetDragActive
+    ? {
+        title: '松开鼠标添加资产',
+        hint: draggingAssetKind === 'video'
+          ? '将创建「参考视频」节点'
+          : draggingAssetKind === 'audio'
+            ? '将创建「参考音频」节点'
+            : '将创建「参考图片」节点',
+      }
+    : getDragOverlayMessage(fileDrag.kinds)
+
+  const overlayIcon = assetDragActive
+    ? (draggingAssetKind === 'video'
+        ? FileVideo
+        : draggingAssetKind === 'audio'
+          ? FileAudio
+          : ImagePlus)
+    : fileDrag.kinds.includes('video') && !fileDrag.kinds.includes('image')
+      ? FileVideo
+      : fileDrag.kinds.includes('audio') && !fileDrag.kinds.includes('image') && !fileDrag.kinds.includes('video')
+        ? FileAudio
+        : ImagePlus
   const OverlayIcon = overlayIcon
 
   return (
@@ -293,7 +353,7 @@ function WorkflowCanvasInner() {
         <CanvasOperator />
       </ReactFlow>
 
-      {fileDrag.active && (
+      {(fileDrag.active || assetDragActive) && (
         <div className="pointer-events-none absolute inset-4 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary-light bg-primary/5 backdrop-blur-[1px]">
           <div className="flex flex-col items-center gap-2 rounded-xl bg-surface/95 px-8 py-6 shadow-lg">
             <OverlayIcon className="h-8 w-8 text-primary-light" />
@@ -308,9 +368,5 @@ function WorkflowCanvasInner() {
 }
 
 export default function WorkflowCanvas() {
-  return (
-    <ReactFlowProvider>
-      <WorkflowCanvasInner />
-    </ReactFlowProvider>
-  )
+  return <WorkflowCanvasInner />
 }

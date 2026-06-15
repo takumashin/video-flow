@@ -3,7 +3,18 @@ import {
   getMaxSizeForKind,
   getUploadKind,
 } from '@/lib/media-upload-shared'
-import { saveUpload } from '@/lib/uploads'
+import { listUploads, saveUpload } from '@/lib/uploads'
+
+export async function GET() {
+  try {
+    const uploads = await listUploads()
+    return NextResponse.json({ uploads })
+  }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '加载资产失败'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
 
 export async function POST(request: Request) {
   try {

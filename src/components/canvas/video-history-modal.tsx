@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Clock, Film, X } from 'lucide-react'
+import { Clock, Film, Play, X } from 'lucide-react'
 import VideoDownloadLink from '@/components/video-download-link'
+import NodeVideoPlayer from '@/components/canvas/node-video-player'
 import { cn } from '@/lib/cn'
 import type { VideoHistoryItem } from '@/lib/types'
 import { NodeType } from '@/lib/types'
@@ -100,15 +101,16 @@ export default function VideoHistoryModal() {
             )
           : (
               <div className="flex min-h-0 flex-1">
-                <div className="flex min-w-0 flex-1 flex-col border-r border-border-subtle bg-zinc-950">
+                <div className="flex min-w-0 flex-1 flex-col bg-zinc-950">
                   {selected && (
                     <>
-                      <video
-                        key={selected.id}
-                        src={selected.videoUrl}
-                        controls
-                        className="aspect-video w-full bg-black"
-                      />
+                      <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+                        <NodeVideoPlayer
+                          key={selected.id}
+                          src={selected.videoUrl}
+                          className="w-full max-w-3xl !min-h-[280px]"
+                        />
+                      </div>
                       <div className="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3">
                         <div className="min-w-0 text-xs text-zinc-400">
                           <span className="flex items-center gap-1.5">
@@ -132,7 +134,7 @@ export default function VideoHistoryModal() {
                   )}
                 </div>
 
-                <div className="flex w-72 shrink-0 flex-col bg-surface">
+                <div className="flex w-72 shrink-0 flex-col border-l border-border-subtle bg-surface">
                   <div className="border-b border-border-subtle px-4 py-3">
                     <p className="text-xs font-medium text-secondary">历史记录</p>
                     <p className="text-[11px] text-muted">最新生成排在最前</p>
@@ -178,14 +180,20 @@ function HistoryListItem({
           : 'border-border hover:border-border hover:bg-surface-muted',
       )}
     >
-      <div className="relative h-14 w-20 shrink-0 overflow-hidden rounded-md bg-zinc-900">
+      <div className="relative aspect-square h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border bg-black">
         <video
           src={item.videoUrl}
           muted
+          playsInline
           preload="metadata"
-          className="h-full w-full object-cover"
+          className="h-full w-full object-contain"
         />
-        <span className="absolute bottom-0.5 right-0.5 rounded bg-black/60 px-1 text-[10px] text-white">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white">
+            <Play className="h-3 w-3 fill-current" />
+          </span>
+        </div>
+        <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[10px] text-white">
           #{index + 1}
         </span>
       </div>

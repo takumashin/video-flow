@@ -1,6 +1,6 @@
 'use client'
 
-import WorkflowCanvas from '@/components/canvas/workflow-canvas'
+import StudioWorkspace from '@/components/studio-workspace'
 import VideoHistoryModal from '@/components/canvas/video-history-modal'
 import RunLogPanel from '@/components/canvas/run-log-panel'
 import StudioHeader from '@/components/studio-header'
@@ -19,9 +19,7 @@ export default function StudioPage() {
         style={{ paddingTop: HEADER_HEIGHT }}
       >
         <WorkflowTabs />
-        <div className="relative z-0 isolate min-h-0 flex-1 overflow-hidden">
-          <WorkflowCanvas />
-        </div>
+        <StudioWorkspace />
         <RunLogPanel />
       </main>
       <VideoHistoryModal />

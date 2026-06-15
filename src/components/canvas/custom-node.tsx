@@ -22,7 +22,8 @@ import VideoDownloadLink from '@/components/video-download-link'
 import VideoGenLoadingState from '@/components/video-gen-loading-state'
 import ImageUploadZone from './image-upload-zone'
 import MediaUploadZone from './media-upload-zone'
-import { SeedanceNodeDetailPanel, SeedanceNodeSummary } from './seedance-node-panel'
+import NodeVideoPlayer from './node-video-player'
+import { SeedanceNodeSummary } from './seedance-node-panel'
 import {
   FieldLabel,
   IMAGE_ROLE_OPTIONS,
@@ -170,19 +171,9 @@ function NodeBody({
               )
             : latestVideo
             ? (
-                <div
-                  className="overflow-hidden rounded-md border border-border"
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={e => e.stopPropagation()}
-                >
-                  <video
-                    key={latestVideo}
-                    src={latestVideo}
-                    controls
-                    playsInline
-                    className="aspect-video w-full bg-black"
-                  />
-                  <div className="flex items-center justify-between gap-2 border-t border-border-subtle px-2 py-1.5">
+                <div className="space-y-2">
+                  <NodeVideoPlayer src={latestVideo} />
+                  <div className="flex items-center justify-between gap-2 px-0.5">
                     <button
                       type="button"
                       className="nodrag inline-flex items-center gap-1 text-[11px] font-medium text-primary-light hover:underline"
@@ -263,46 +254,33 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
 
   if (data.type === NodeType.Seedance) {
     return (
-      <div className={cn('relative', selected && 'z-10')}>
-        <div className={cn('w-[300px]', cardClass)}>
-          {showTarget && (
-            <Handle
-              type="target"
-              position={Position.Left}
-              className="!h-3 !w-3 !border-2 !border-surface !bg-primary-light"
-            />
-          )}
+      <div className={cn('w-[300px]', cardClass)}>
+        {showTarget && (
+          <Handle
+            type="target"
+            position={Position.Left}
+            className="!h-3 !w-3 !border-2 !border-surface !bg-primary-light"
+          />
+        )}
 
-          {header}
+        {header}
 
-          <div className="px-3 py-2.5">
-            <SeedanceNodeSummary
-              id={id}
-              data={data}
-              disabled={nodeDisabled}
-              nodes={nodes}
-              edges={edges}
-              selected={selected}
-            />
-          </div>
-
-          {showSource && (
-            <Handle
-              type="source"
-              position={Position.Right}
-              className="!h-3 !w-3 !border-2 !border-surface !bg-primary-light"
-            />
-          )}
-        </div>
-
-        {selected && (
-          <SeedanceNodeDetailPanel
+        <div className="px-3 py-2.5">
+          <SeedanceNodeSummary
             id={id}
             data={data}
             disabled={nodeDisabled}
             nodes={nodes}
             edges={edges}
-            className="absolute left-0 top-full z-10 mt-2 w-[400px]"
+            selected={selected}
+          />
+        </div>
+
+        {showSource && (
+          <Handle
+            type="source"
+            position={Position.Right}
+            className="!h-3 !w-3 !border-2 !border-surface !bg-primary-light"
           />
         )}
       </div>
@@ -310,7 +288,10 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
   }
 
   return (
-    <div className={cn('w-[300px]', cardClass)}>
+    <div className={cn(
+      data.type === NodeType.Output ? 'w-[360px]' : 'w-[300px]',
+      cardClass,
+    )}>
       {showTarget && (
         <Handle
           type="target"

@@ -94,6 +94,56 @@ export async function readUploadAsDataUrl(id: string): Promise<string | null> {
   return `data:${file.mimeType};base64,${base64}`
 }
 
+export type UploadAssetKind = 'image' | 'video' | 'audio'
+
+export type UploadListItem = {
+  id: string
+  url: string
+  kind: UploadAssetKind
+  filename: string
+  size: number
+  createdAt: number
+}
+
+export function getUploadKindFromFilename(filename: string): UploadAssetKind | null {
+  const mime = getMimeTypeFromFilename(filename)
+  if (mime.startsWith('image/'))
+    return 'image'
+  if (mime.startsWith('video/'))
+    return 'video'
+  if (mime.startsWith('audio/'))
+    return 'audio'
+  return null
+}
+
+export async function listUploads(): Promise<UploadListItem[]> {
+  await ensureUploadDir()
+  const entries = await fs.readdir(UPLOAD_DIR)
+  const items: UploadListItem[] = []
+
+  for (const filename of entries) {
+    const kind = getUploadKindFromFilename(filename)
+    if (!kind)
+      continue
+
+    const filePath = path.join(UPLOAD_DIR, filename)
+    const stat = await fs.stat(filePath)
+    if (!stat.isFile())
+      continue
+
+    items.push({
+      id: filename,
+      url: `/api/uploads/${filename}`,
+      kind,
+      filename,
+      size: stat.size,
+      createdAt: stat.mtimeMs,
+    })
+  }
+
+  return items.sort((a, b) => b.createdAt - a.createdAt)
+}
+
 export function extractUploadId(imageUrl: string): string | null {
   const trimmed = imageUrl.trim()
   const match = trimmed.match(/\/api\/uploads\/([^/?#]+)/)

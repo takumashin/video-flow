@@ -102,12 +102,12 @@ export default function ImageUploadZone({ value, onChange, disabled }: ImageUplo
       {value
         ? (
             <div className="space-y-2">
-              <div className="overflow-hidden rounded-md border border-border bg-surface-muted">
+              <div className="rounded-md border border-border bg-surface-muted p-1">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={value}
                   alt="参考图预览"
-                  className="h-28 w-full object-cover"
+                  className="mx-auto block max-h-72 w-full object-contain"
                 />
               </div>
               <div className="flex gap-2">

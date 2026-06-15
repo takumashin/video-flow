@@ -91,7 +91,7 @@ export function SeedanceNodeSummary({
       )}
 
       {!selected && !isGenerating && (
-        <p className="text-[10px] text-muted/80">选中节点以展开详细配置</p>
+        <p className="text-[10px] text-muted/80">点击节点后在右侧栏配置</p>
       )}
     </div>
   )
@@ -104,7 +104,8 @@ export function SeedanceNodeDetailPanel({
   nodes,
   edges,
   className,
-}: SeedancePanelProps & { className?: string }) {
+  variant = 'floating',
+}: SeedancePanelProps & { className?: string; variant?: 'floating' | 'sidebar' }) {
   const updateNodeData = useWorkflowStore(s => s.updateNodeData)
   const pruneSeedanceEdgesForMode = useWorkflowStore(s => s.pruneSeedanceEdgesForMode)
   const upstreamRefs = getSeedanceUpstreamRefs(id, nodes, edges)
@@ -113,14 +114,18 @@ export function SeedanceNodeDetailPanel({
   return (
     <div
       className={cn(
-        'nodrag rounded-xl border border-primary-light/40 bg-surface px-3 py-2.5 shadow-lg ring-2 ring-primary-light/15',
+        variant === 'sidebar'
+          ? 'space-y-2.5'
+          : 'nodrag rounded-xl border border-primary-light/40 bg-surface px-3 py-2.5 shadow-lg ring-2 ring-primary-light/15',
         className,
       )}
-      onPointerDown={e => e.stopPropagation()}
+      onPointerDown={variant === 'floating' ? e => e.stopPropagation() : undefined}
     >
-      <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted">
-        生成配置
-      </p>
+      {variant === 'floating' && (
+        <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted">
+          生成配置
+        </p>
+      )}
 
       <div className="space-y-2.5">
         <PromptWithMentions
