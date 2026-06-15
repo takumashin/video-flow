@@ -1,5 +1,6 @@
 import type { ListSeedanceTasksOptions, SeedanceCreateTaskRequest, SeedanceTaskListResponse, SeedanceTaskResponse } from './types'
 import type { SeedanceApiVideoParams } from './seedance-params'
+import { SEEDANCE_POLL_INTERVAL_MS } from './seedance-progress'
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com'
 
@@ -190,15 +191,13 @@ export async function pollSeedanceTask(
   taskId: string,
   options?: {
     intervalMs?: number
-    maxAttempts?: number
     expectedDurationSec?: number
     onProgress?: (status: SeedanceTaskResponse, progress: number) => void
   },
 ): Promise<SeedanceTaskResponse> {
-  const intervalMs = options?.intervalMs ?? 8000
-  const maxAttempts = options?.maxAttempts ?? 60
+  const intervalMs = options?.intervalMs ?? SEEDANCE_POLL_INTERVAL_MS
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  while (true) {
     const task = await getSeedanceTask(taskId)
     const progress = extractSeedanceTaskProgress(task, { expectedDurationSec: options?.expectedDurationSec })
     options?.onProgress?.(task, progress)
@@ -209,6 +208,4 @@ export async function pollSeedanceTask(
 
     await new Promise(resolve => setTimeout(resolve, intervalMs))
   }
-
-  throw new Error('视频生成超时，请稍后在任务列表中查看')
 }

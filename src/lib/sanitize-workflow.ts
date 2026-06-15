@@ -14,6 +14,7 @@ export function sanitizeNodesForSave(nodes: WorkflowNode[]): WorkflowNode[] {
           taskId: undefined,
           error: undefined,
           progress: undefined,
+          progressStartedAt: undefined,
         },
       }
     }

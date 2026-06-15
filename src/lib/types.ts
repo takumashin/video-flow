@@ -75,8 +75,10 @@ export type SeedanceNodeData = {
   watermark: boolean
   cameraFixed: boolean
   status: 'idle' | 'running' | 'succeeded' | 'failed'
-  /** 0–100，来自查询任务 API 的进度百分比 */
+  /** 0–100，展示用假进度（基于 progressStartedAt 计算） */
   progress?: number
+  /** 本次生成开始时间，用于假进度条 */
+  progressStartedAt?: number
   taskId?: string
   error?: string
 }

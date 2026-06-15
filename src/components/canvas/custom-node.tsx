@@ -13,6 +13,7 @@ import {
   Video,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { useFakeSeedanceProgress } from '@/lib/use-fake-seedance-progress'
 import type { WorkflowEdge, WorkflowNode, WorkflowNodeData } from '@/lib/types'
 import { NodeType } from '@/lib/types'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
@@ -40,6 +41,82 @@ const nodeMeta: Record<NodeType, { icon: typeof Play; color: string; bg: string 
   [NodeType.AudioInput]: { icon: Music, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800' },
   [NodeType.Seedance]: { icon: Sparkles, color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-50 border-orange-200 dark:bg-orange-950/40 dark:border-orange-800' },
   [NodeType.Output]: { icon: Film, color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-50 border-rose-200 dark:bg-rose-950/40 dark:border-rose-800' },
+}
+
+function OutputNodeBody({
+  id,
+  data,
+  nodes,
+  edges,
+}: {
+  id: string
+  data: Extract<WorkflowNodeData, { type: NodeType.Output }>
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+}) {
+  const latestVideo = data.videoUrl ?? data.videoHistory?.[0]?.videoUrl
+  const historyCount = data.videoHistory?.length ?? 0
+  const upstreamSeedance = nodes.find(
+    n => n.data.type === NodeType.Seedance
+      && n.data.status === 'running'
+      && edges.some(e => e.source === n.id && e.target === id),
+  )
+  const isOutputGenerating = data.status === 'running' || upstreamSeedance != null
+  const upstreamProgress = useFakeSeedanceProgress(
+    upstreamSeedance?.data.type === NodeType.Seedance
+      ? upstreamSeedance.data.progressStartedAt
+      : undefined,
+    upstreamSeedance ? 'running' : undefined,
+    upstreamSeedance?.data.type === NodeType.Seedance ? upstreamSeedance.data.progress : undefined,
+  )
+
+  return (
+    <div className="space-y-2">
+      {!isOutputGenerating && <StatusBadge status={data.status} />}
+      {isOutputGenerating && !latestVideo
+        ? (
+            <VideoGenLoadingState
+              progress={upstreamProgress}
+              label="正在生成视频…"
+              maxWidth="100%"
+              aspectRatio="video"
+              className="nodrag"
+            />
+          )
+        : latestVideo
+        ? (
+            <div className="space-y-2">
+              <NodeVideoPlayer src={latestVideo} />
+              <div className="flex items-center justify-between gap-2 px-0.5">
+                <button
+                  type="button"
+                  className="nodrag inline-flex items-center gap-1 text-[11px] font-medium text-primary-light hover:underline"
+                  onClick={() => useWorkflowStore.getState().openVideoHistoryModal(id)}
+                >
+                  <History className="h-3 w-3" />
+                  查看历史 ({historyCount})
+                </button>
+                <VideoDownloadLink
+                  videoUrl={latestVideo}
+                  className="text-[11px] font-medium text-muted hover:text-primary-light hover:underline"
+                  showIcon={false}
+                />
+              </div>
+            </div>
+          )
+        : (
+            <button
+              type="button"
+              className="nodrag flex w-full flex-col items-center gap-1.5 rounded-md border border-dashed border-border bg-surface-muted py-4 text-center transition hover:border-border hover:bg-surface-muted/80"
+              onClick={() => useWorkflowStore.getState().openVideoHistoryModal(id)}
+            >
+              <Film className="h-5 w-5 text-muted" />
+              <p className="text-xs text-muted">等待生成结果...</p>
+              <p className="text-[11px] text-muted/80">点击可查看历史记录</p>
+            </button>
+          )}
+    </div>
+  )
 }
 
 function NodeBody({
@@ -142,72 +219,15 @@ function NodeBody({
         </div>
       )
 
+    case NodeType.Seedance:
+      return null
+
     case NodeType.Output:
-      const latestVideo = data.videoUrl ?? data.videoHistory?.[0]?.videoUrl
-      const historyCount = data.videoHistory?.length ?? 0
-      const upstreamSeedance = nodes.find(
-        n => n.data.type === NodeType.Seedance
-          && n.data.status === 'running'
-          && edges.some(e => e.source === n.id && e.target === id),
-      )
-      const isOutputGenerating = data.status === 'running' || upstreamSeedance != null
-
-      const upstreamProgress = upstreamSeedance?.data.type === NodeType.Seedance
-        ? upstreamSeedance.data.progress
-        : undefined
-
-      return (
-        <div className="space-y-2">
-          {!isOutputGenerating && <StatusBadge status={data.status} />}
-          {isOutputGenerating && !latestVideo
-            ? (
-                <VideoGenLoadingState
-                  progress={upstreamProgress}
-                  label="正在生成视频…"
-                  maxWidth="100%"
-                  aspectRatio="video"
-                  className="nodrag"
-                />
-              )
-            : latestVideo
-            ? (
-                <div className="space-y-2">
-                  <NodeVideoPlayer src={latestVideo} />
-                  <div className="flex items-center justify-between gap-2 px-0.5">
-                    <button
-                      type="button"
-                      className="nodrag inline-flex items-center gap-1 text-[11px] font-medium text-primary-light hover:underline"
-                      onClick={() => useWorkflowStore.getState().openVideoHistoryModal(id)}
-                    >
-                      <History className="h-3 w-3" />
-                      查看历史 ({historyCount})
-                    </button>
-                    <VideoDownloadLink
-                      videoUrl={latestVideo}
-                      className="text-[11px] font-medium text-muted hover:text-primary-light hover:underline"
-                      showIcon={false}
-                    />
-                  </div>
-                </div>
-              )
-            : (
-                <button
-                  type="button"
-                  className="nodrag flex w-full flex-col items-center gap-1.5 rounded-md border border-dashed border-border bg-surface-muted py-4 text-center transition hover:border-border hover:bg-surface-muted/80"
-                  onClick={() => useWorkflowStore.getState().openVideoHistoryModal(id)}
-                >
-                  <Film className="h-5 w-5 text-muted" />
-                  <p className="text-xs text-muted">等待生成结果...</p>
-                  <p className="text-[11px] text-muted/80">点击可查看历史记录</p>
-                </button>
-              )}
-        </div>
-      )
+      return <OutputNodeBody id={id} data={data} nodes={nodes} edges={edges} />
   }
 }
 
 export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNodeData>) {
-  const updateNodeData = useWorkflowStore(s => s.updateNodeData)
   const deleteNode = useWorkflowStore(s => s.deleteNode)
   const nodes = useActiveWorkflowSession()?.nodes ?? []
   const edges = useActiveWorkflowSession()?.edges ?? []
@@ -231,13 +251,9 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
       )}
     >
       <Icon className={cn('h-4 w-4 shrink-0', meta.color)} />
-      <input
-        value={data.title}
-        onChange={e => updateNodeData(id, { title: e.target.value })}
-        disabled={nodeDisabled}
-        className="nodrag nokey min-w-0 flex-1 cursor-text bg-transparent text-sm font-medium text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-50"
-        placeholder="节点名称"
-      />
+      <span className="min-w-0 flex-1 select-none truncate text-sm font-medium text-foreground">
+        {data.title}
+      </span>
       {canDelete && (
         <button
           type="button"

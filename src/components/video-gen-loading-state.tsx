@@ -58,23 +58,34 @@ export default function VideoGenLoadingState({
 
     let animationId = 0
     let startTime = performance.now()
+    let lastWidth = 0
+    let lastHeight = 0
 
-    const resize = () => {
-      const rect = surface.getBoundingClientRect()
-      if (rect.width <= 0 || rect.height <= 0)
-        return
+    const syncCanvasSize = (width: number, height: number) => {
+      if (width <= 0 || height <= 0)
+        return false
+
+      const roundedWidth = Math.round(width)
+      const roundedHeight = Math.round(height)
+      if (roundedWidth === lastWidth && roundedHeight === lastHeight)
+        return true
+
+      lastWidth = roundedWidth
+      lastHeight = roundedHeight
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
-      canvas.width = Math.floor(rect.width * dpr)
-      canvas.height = Math.floor(rect.height * dpr)
-      canvas.style.width = `${rect.width}px`
-      canvas.style.height = `${rect.height}px`
+      canvas.width = Math.max(1, Math.floor(roundedWidth * dpr))
+      canvas.height = Math.max(1, Math.floor(roundedHeight * dpr))
+      canvas.style.width = `${roundedWidth}px`
+      canvas.style.height = `${roundedHeight}px`
+      return true
     }
 
     const draw = (time: number) => {
       const rect = surface.getBoundingClientRect()
       const w = rect.width
       const h = rect.height
-      if (w <= 0 || h <= 0) {
+
+      if (!syncCanvasSize(w, h)) {
         animationId = requestAnimationFrame(draw)
         return
       }
@@ -84,12 +95,12 @@ export default function VideoGenLoadingState({
       ctx.clearRect(0, 0, w, h)
 
       const t = (time - startTime) / 1000
-      const spacing = 13
-      const cols = Math.ceil(w / spacing) + 1
-      const rows = Math.ceil(h / spacing) + 1
+      const spacing = 12
+      const cols = Math.ceil(w / spacing) + 2
+      const rows = Math.ceil(h / spacing) + 2
 
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
+      for (let row = -1; row < rows; row++) {
+        for (let col = -1; col < cols; col++) {
           const x = col * spacing + spacing * 0.5
           const y = row * spacing + spacing * 0.5
 
@@ -99,8 +110,8 @@ export default function VideoGenLoadingState({
           const combined = (wave1 + wave2 + wave3) / 3
           const pulse = 0.5 + combined * 0.5
           const radius = 1.2 + pulse * 2.8
+          const alpha = 0.32 + pulse * 0.48
 
-          const alpha = 0.28 + pulse * 0.52
           ctx.beginPath()
           ctx.arc(x, y, radius, 0, Math.PI * 2)
           ctx.fillStyle = sampleRainbowColor(x, y, w, h, t)
@@ -113,10 +124,12 @@ export default function VideoGenLoadingState({
       animationId = requestAnimationFrame(draw)
     }
 
-    resize()
     animationId = requestAnimationFrame(draw)
 
-    const ro = new ResizeObserver(() => resize())
+    const ro = new ResizeObserver(() => {
+      lastWidth = 0
+      lastHeight = 0
+    })
     ro.observe(surface)
 
     return () => {
@@ -125,8 +138,6 @@ export default function VideoGenLoadingState({
     }
   }, [])
 
-  const paddingBottom = aspectRatio === 'square' ? '100%' : '56.25%'
-
   return (
     <div
       className={cn('relative w-full', className)}
@@ -134,50 +145,38 @@ export default function VideoGenLoadingState({
       data-testid="video-gen-loading-state-frame"
     >
       <div
-        className="relative w-full"
-        data-testid="video-gen-loading-state-entry-surface"
+        ref={surfaceRef}
+        aria-label={label}
+        data-testid="video-gen-loading-state"
+        className={cn(
+          'relative isolate w-full overflow-hidden rounded-[36px] bg-surface-muted/80 text-foreground dark:bg-surface-muted/60',
+          aspectRatio === 'square' ? 'aspect-square' : 'aspect-video',
+        )}
       >
-        <div
-          ref={surfaceRef}
-          aria-label={label}
-          data-testid="video-gen-loading-state"
-          className="relative isolate w-full overflow-hidden rounded-[36px] bg-surface-muted/80 text-foreground transition-colors duration-200 ease-out dark:bg-surface-muted/60"
-          style={{ paddingBottom }}
-        >
-          <div className="absolute inset-0 z-10">
-            <div
-              aria-hidden
-              data-testid="video-gen-loading-state-dots"
-              className="pointer-events-none absolute inset-0 overflow-hidden"
-            >
-              <div className="h-full" data-testid="loading-halftone-dots-animation" style={{ opacity: 0.42 }}>
-                <div className="relative h-full w-full">
-                  <canvas
-                    ref={canvasRef}
-                    aria-hidden
-                    className="block h-full w-full [mask-image:linear-gradient(to_top_left,rgba(0,0,0,0)_0%,rgba(0,0,0,1)_28%,rgba(0,0,0,1)_72%,rgba(0,0,0,0)_100%)] [mask-repeat:no-repeat] [mask-size:100%_100%] [-webkit-mask-image:linear-gradient(to_top_left,rgba(0,0,0,0)_0%,rgba(0,0,0,1)_28%,rgba(0,0,0,1)_72%,rgba(0,0,0,0)_100%)] [-webkit-mask-repeat:no-repeat] [-webkit-mask-size:100%_100%]"
-                  />
-                </div>
-              </div>
-            </div>
+        <canvas
+          ref={canvasRef}
+          aria-hidden
+          data-testid="video-gen-loading-state-dots"
+          className="absolute inset-0 block h-full w-full opacity-50"
+        />
 
-            <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-2 px-4 pb-4 pt-10 bg-gradient-to-t from-black/50 via-black/20 to-transparent">
-              <p className="text-xs font-medium text-white drop-shadow-sm">{label}</p>
-              {progress != null && (
-                <div className="flex w-full max-w-[220px] items-center gap-2">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/25">
-                    <div
-                      className="task-progress-bar-fill h-full rounded-full transition-[width] duration-500 ease-out"
-                      style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-                    />
-                  </div>
-                  <span className="text-[10px] font-semibold tabular-nums text-white/95">
-                    {Math.round(progress)}%
-                  </span>
-                </div>
-              )}
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(0,0,0,0.18)_100%)]" />
+
+        <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 bg-gradient-to-t from-black/55 via-black/25 to-transparent px-4 pb-4 pt-10">
+          <p className="text-xs font-medium text-white drop-shadow-sm">{label}</p>
+          {progress != null && (
+            <div className="flex w-full max-w-[220px] items-center gap-2">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/25">
+                <div
+                  className="task-progress-bar-fill h-full rounded-full transition-[width] duration-500 ease-out"
+                  style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+                />
+              </div>
+              <span className="text-[10px] font-semibold tabular-nums text-white/95">
+                {Math.round(progress)}%
+              </span>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

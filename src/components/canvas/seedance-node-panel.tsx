@@ -10,6 +10,7 @@ import {
 } from '@/lib/seedance-models'
 import { getSeedanceUpstreamRefs } from '@/lib/seedance-upstream'
 import { SEEDANCE_MODE_OPTIONS } from '@/lib/seedance-modes'
+import { useFakeSeedanceProgress } from '@/lib/use-fake-seedance-progress'
 import { useWorkflowStore } from '@/store/workflow-store'
 import VideoGenLoadingState from '@/components/video-gen-loading-state'
 import PromptWithMentions from './prompt-with-mentions'
@@ -44,6 +45,11 @@ export function SeedanceNodeSummary({
   const modelLabel = getModelOption(data.model)?.label ?? data.model
   const prompt = (data.prompt ?? (data as { composedPrompt?: string }).composedPrompt ?? '').trim()
   const isGenerating = data.status === 'running'
+  const displayProgress = useFakeSeedanceProgress(
+    data.progressStartedAt,
+    isGenerating ? 'running' : data.status,
+    data.progress,
+  )
   const upstreamRefs = getSeedanceUpstreamRefs(id, nodes, edges)
   const refCount = upstreamRefs.images.length + upstreamRefs.videos.length + upstreamRefs.audios.length
 
@@ -73,7 +79,7 @@ export function SeedanceNodeSummary({
 
       {isGenerating && (
         <VideoGenLoadingState
-          progress={data.progress}
+          progress={displayProgress}
           label="正在生成视频…"
           maxWidth="100%"
           aspectRatio="video"
@@ -86,7 +92,7 @@ export function SeedanceNodeSummary({
           status={data.status}
           error={data.error}
           taskId={data.taskId}
-          progress={data.progress}
+          progress={displayProgress}
         />
       )}
 
@@ -110,6 +116,11 @@ export function SeedanceNodeDetailPanel({
   const pruneSeedanceEdgesForMode = useWorkflowStore(s => s.pruneSeedanceEdgesForMode)
   const upstreamRefs = getSeedanceUpstreamRefs(id, nodes, edges)
   const isGenerating = data.status === 'running'
+  const displayProgress = useFakeSeedanceProgress(
+    data.progressStartedAt,
+    isGenerating ? 'running' : data.status,
+    data.progress,
+  )
 
   return (
     <div
@@ -225,7 +236,7 @@ export function SeedanceNodeDetailPanel({
             ? <Loader2 className="h-4 w-4 animate-spin" />
             : <Play className="h-4 w-4" />}
           {isGenerating
-            ? (data.progress != null ? `生成中 ${data.progress}%` : '生成中...')
+            ? (displayProgress != null ? `生成中 ${displayProgress}%` : '生成中...')
             : '生成视频'}
         </button>
       </div>

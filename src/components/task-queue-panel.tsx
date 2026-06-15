@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CheckCircle2,
   Clock3,
@@ -13,8 +13,11 @@ import {
   ListOrdered,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { computeFakeSeedanceProgress, SEEDANCE_POLL_INTERVAL_MS } from '@/lib/seedance-progress'
+import { useFakeSeedanceProgress } from '@/lib/use-fake-seedance-progress'
 import { TaskProgressBar } from '@/components/canvas/node-fields'
 import VideoDownloadLink from '@/components/video-download-link'
+import type { LocalTaskQueueItem } from '@/store/task-queue-store'
 import type { SeedanceTaskListItem, SeedanceTaskStatus } from '@/lib/types'
 import { useTaskQueueStore } from '@/store/task-queue-store'
 
@@ -71,6 +74,125 @@ function TaskProgressSection({ status, progress }: { status: SeedanceTaskStatus;
   return null
 }
 
+function resolveTaskStartedAtMs(task: SeedanceTaskListItem, local?: LocalTaskQueueItem) {
+  if (local?.createdAt)
+    return local.createdAt
+  if (task.created_at)
+    return task.created_at > 1e12 ? task.created_at : task.created_at * 1000
+  return undefined
+}
+
+function TaskQueueRow({
+  task,
+  local,
+  savingId,
+  onSaveToLocal,
+}: {
+  task: SeedanceTaskListItem
+  local?: LocalTaskQueueItem
+  savingId: string | null
+  onSaveToLocal: (task: SeedanceTaskListItem) => void
+}) {
+  const startedAtMs = resolveTaskStartedAtMs(task, local)
+  const displayProgress = useFakeSeedanceProgress(
+    startedAtMs,
+    task.status,
+    local?.progress ?? task.progress,
+  )
+  const videoUrl = task.content?.video_url ?? local?.videoUrl
+  const isLocal = videoUrl?.startsWith('/api/videos/')
+
+  return (
+    <li className="px-4 py-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={task.status} progress={displayProgress} />
+            {local?.nodeTitle && (
+              <span className="truncate text-[10px] text-muted">{local.nodeTitle}</span>
+            )}
+            {task.model && (
+              <span className="truncate text-[10px] text-muted">{task.model}</span>
+            )}
+          </div>
+          {local?.prompt && (
+            <p className="mt-1 line-clamp-2 text-[11px] text-secondary">{local.prompt}</p>
+          )}
+          <p className="mt-1 break-all font-mono text-[10px] text-secondary">
+            {task.id}
+          </p>
+          <p className="mt-1 text-[10px] text-muted">
+            创建 {formatTaskTime(task.created_at)}
+            {task.updated_at && task.updated_at !== task.created_at
+              ? ` · 更新 ${formatTaskTime(task.updated_at)}`
+              : ''}
+          </p>
+          <TaskProgressSection status={task.status} progress={displayProgress} />
+          {task.error?.message && (
+            <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">
+              {task.error.message}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {task.status === 'succeeded' && videoUrl && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <a
+            href={videoUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] font-medium text-secondary hover:bg-surface-muted"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {isLocal ? '本地预览' : '打开视频'}
+          </a>
+          <VideoDownloadLink
+            videoUrl={videoUrl}
+            taskId={task.id}
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] font-medium text-secondary hover:bg-surface-muted"
+            iconClassName="h-3 w-3"
+            label="下载 MP4"
+          />
+          {!isLocal && (
+            <button
+              type="button"
+              disabled={savingId === task.id}
+              onClick={() => onSaveToLocal(task)}
+              className="inline-flex items-center gap-1 rounded-md border border-primary-light/30 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary-light hover:bg-primary/15 disabled:opacity-50"
+            >
+              {savingId === task.id
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <Download className="h-3 w-3" />}
+              保存到本地
+            </button>
+          )}
+          {isLocal && (
+            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3 w-3" />
+              已保存本地
+            </span>
+          )}
+        </div>
+      )}
+
+      {task.status === 'failed' && (
+        <div className="mt-2 flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400">
+          <XCircle className="h-3 w-3 shrink-0" />
+          任务失败
+        </div>
+      )}
+
+      {(task.status === 'queued' || task.status === 'running') && displayProgress == null && (
+        <div className="mt-2 flex items-center gap-1.5 text-[10px] text-primary-light">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          生成进行中，正在同步进度…
+        </div>
+      )}
+    </li>
+  )
+}
+
 export default function TaskQueuePanel() {
   const open = useTaskQueueStore(s => s.open)
   const closePanel = useTaskQueueStore(s => s.closePanel)
@@ -87,6 +209,13 @@ export default function TaskQueuePanel() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<string | null>(null)
+  const itemsRef = useRef(items)
+  itemsRef.current = items
+
+  const activeTaskIds = items
+    .filter(item => item.status === 'queued' || item.status === 'running')
+    .map(item => item.id)
+    .join(',')
 
   const fetchTasks = useCallback(async () => {
     setLoading(true)
@@ -133,25 +262,13 @@ export default function TaskQueuePanel() {
   }, [open, fetchTasks])
 
   useEffect(() => {
-    if (!open)
-      return
-
-    const hasActive = items.some(item => item.status === 'queued' || item.status === 'running')
-    if (!hasActive)
-      return
-
-    const timer = window.setInterval(fetchTasks, 10000)
-    return () => window.clearInterval(timer)
-  }, [open, items, fetchTasks])
-
-  useEffect(() => {
-    if (!open)
+    if (!open || !activeTaskIds)
       return
 
     let cancelled = false
 
     const pollActiveProgress = async () => {
-      const active = items.filter(item => item.status === 'queued' || item.status === 'running')
+      const active = itemsRef.current.filter(item => item.status === 'queued' || item.status === 'running')
       if (!active.length)
         return
 
@@ -165,15 +282,17 @@ export default function TaskQueuePanel() {
           if (!response.ok)
             continue
 
+          const local = useTaskQueueStore.getState().localTasks.find(t => t.taskId === task.id)
+          const startedAtMs = resolveTaskStartedAtMs(task, local) ?? Date.now()
+          const fakeProgress = computeFakeSeedanceProgress(startedAtMs, data.status)
+
           upsertLocalTask({
             id: task.id,
             taskId: task.id,
             status: data.status,
-            progress: typeof data.progress === 'number' ? data.progress : undefined,
+            progress: fakeProgress,
             videoUrl: data.videoUrl,
-            createdAt: task.created_at
-              ? (task.created_at > 1e12 ? task.created_at : task.created_at * 1000)
-              : Date.now(),
+            createdAt: startedAtMs,
           })
 
           setItems(prev => prev.map(item =>
@@ -181,7 +300,6 @@ export default function TaskQueuePanel() {
               ? {
                   ...item,
                   status: data.status,
-                  progress: typeof data.progress === 'number' ? data.progress : item.progress,
                   content: data.videoUrl
                     ? { ...item.content, video_url: data.videoUrl }
                     : item.content,
@@ -197,12 +315,12 @@ export default function TaskQueuePanel() {
     }
 
     pollActiveProgress()
-    const timer = window.setInterval(pollActiveProgress, 5000)
+    const timer = window.setInterval(pollActiveProgress, SEEDANCE_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [open, items, upsertLocalTask])
+  }, [open, activeTaskIds, upsertLocalTask])
 
   const saveToLocal = async (task: SeedanceTaskListItem) => {
     const sourceUrl = task.content?.video_url
@@ -333,101 +451,15 @@ export default function TaskQueuePanel() {
                 )
               : (
                   <ul className="divide-y divide-border-subtle">
-                    {items.map(task => {
-                      const local = localTasks.find(t => t.taskId === task.id)
-                      const mergedProgress = local?.progress ?? task.progress
-                      const videoUrl = task.content?.video_url ?? local?.videoUrl
-                      const isLocal = videoUrl?.startsWith('/api/videos/')
-                      return (
-                        <li key={task.id} className="px-4 py-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <StatusBadge status={task.status} progress={mergedProgress} />
-                                {local?.nodeTitle && (
-                                  <span className="truncate text-[10px] text-muted">{local.nodeTitle}</span>
-                                )}
-                                {task.model && (
-                                  <span className="truncate text-[10px] text-muted">{task.model}</span>
-                                )}
-                              </div>
-                              {local?.prompt && (
-                                <p className="mt-1 line-clamp-2 text-[11px] text-secondary">{local.prompt}</p>
-                              )}
-                              <p className="mt-1 break-all font-mono text-[10px] text-secondary">
-                                {task.id}
-                              </p>
-                              <p className="mt-1 text-[10px] text-muted">
-                                创建 {formatTaskTime(task.created_at)}
-                                {task.updated_at && task.updated_at !== task.created_at
-                                  ? ` · 更新 ${formatTaskTime(task.updated_at)}`
-                                  : ''}
-                              </p>
-                              <TaskProgressSection status={task.status} progress={mergedProgress} />
-                              {task.error?.message && (
-                                <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">
-                                  {task.error.message}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-
-                          {task.status === 'succeeded' && videoUrl && (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              <a
-                                href={videoUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] font-medium text-secondary hover:bg-surface-muted"
-                              >
-                                <ExternalLink className="h-3 w-3" />
-                                {isLocal ? '本地预览' : '打开视频'}
-                              </a>
-                              <VideoDownloadLink
-                                videoUrl={videoUrl}
-                                taskId={task.id}
-                                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] font-medium text-secondary hover:bg-surface-muted"
-                                iconClassName="h-3 w-3"
-                                label="下载 MP4"
-                              />
-                              {!isLocal && (
-                                <button
-                                  type="button"
-                                  disabled={savingId === task.id}
-                                  onClick={() => saveToLocal(task)}
-                                  className="inline-flex items-center gap-1 rounded-md border border-primary-light/30 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary-light hover:bg-primary/15 disabled:opacity-50"
-                                >
-                                  {savingId === task.id
-                                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                                    : <Download className="h-3 w-3" />}
-                                  保存到本地
-                                </button>
-                              )}
-                              {isLocal && (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  已存本地
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          {(task.status === 'queued' || task.status === 'running') && mergedProgress == null && (
-                            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-primary-light">
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              生成进行中，正在同步进度…
-                            </div>
-                          )}
-
-                          {task.status === 'failed' && (
-                            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400">
-                              <XCircle className="h-3 w-3" />
-                              任务失败
-                            </div>
-                          )}
-                        </li>
-                      )
-                    })}
+                    {items.map(task => (
+                      <TaskQueueRow
+                        key={task.id}
+                        task={task}
+                        local={localTasks.find(t => t.taskId === task.id)}
+                        savingId={savingId}
+                        onSaveToLocal={saveToLocal}
+                      />
+                    ))}
                   </ul>
                 )}
         </div>

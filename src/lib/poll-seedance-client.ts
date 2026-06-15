@@ -1,3 +1,5 @@
+import { computeFakeSeedanceProgress, SEEDANCE_POLL_INTERVAL_MS } from './seedance-progress'
+import { sleep } from './sleep'
 import type { SeedanceTaskStatus } from './types'
 
 export type SeedanceTaskPollResult = {
@@ -14,25 +16,31 @@ export async function pollSeedanceTaskClient(
   taskId: string,
   options?: {
     intervalMs?: number
-    maxAttempts?: number
+    startedAtMs?: number
+    signal?: AbortSignal
     onProgress?: (result: SeedanceTaskPollResult) => void
   },
 ): Promise<SeedanceTaskPollResult> {
-  const intervalMs = options?.intervalMs ?? 5000
-  const maxAttempts = options?.maxAttempts ?? 72
+  const intervalMs = options?.intervalMs ?? SEEDANCE_POLL_INTERVAL_MS
+  const startedAtMs = options?.startedAtMs ?? Date.now()
+  const signal = options?.signal
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const response = await fetch(`/api/seedance/tasks/${taskId}`, { cache: 'no-store' })
+  while (true) {
+    if (signal?.aborted)
+      throw new DOMException('Aborted', 'AbortError')
+
+    const response = await fetch(`/api/seedance/tasks/${taskId}`, { cache: 'no-store', signal })
     const data = await response.json()
 
     if (!response.ok) {
       throw new Error(data.error || '查询任务失败')
     }
 
+    const status = data.status as SeedanceTaskStatus
     const result: SeedanceTaskPollResult = {
       taskId: data.taskId ?? taskId,
-      status: data.status,
-      progress: typeof data.progress === 'number' ? data.progress : 0,
+      status,
+      progress: computeFakeSeedanceProgress(startedAtMs, status),
       videoUrl: data.videoUrl,
       error: data.error,
     }
@@ -42,8 +50,6 @@ export async function pollSeedanceTaskClient(
     if (TERMINAL_STATUSES.includes(result.status))
       return result
 
-    await new Promise(resolve => setTimeout(resolve, intervalMs))
+    await sleep(intervalMs, signal)
   }
-
-  throw new Error('视频生成超时，请稍后在任务列表中查看')
 }

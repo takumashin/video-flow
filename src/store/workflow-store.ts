@@ -17,7 +17,12 @@ import {
   updatePromptAfterVideoRemoval,
   getSeedanceUpstreamRefs,
 } from '@/lib/seedance-upstream'
-import { runSeedanceNodeSession } from '@/lib/run-workflow-session'
+import { runSeedanceNodeSession, resumeSeedanceNodeSession, handleSeedanceSessionError, finalizeSeedanceSessionJob } from '@/lib/run-workflow-session'
+import {
+  beginSeedanceJob,
+  cancelSeedanceJob,
+  isSeedanceJobInflight,
+} from '@/lib/seedance-generation-control'
 import {
   createWorkflowSession,
   patchWorkflowSession,
@@ -75,6 +80,106 @@ type WorkflowStore = {
   clearWorkflowSavedId: (sessionId?: string) => void
   setSessionWorkflowMeta: (sessionId: string, workflowId: string, name: string) => void
   runSeedanceNode: (seedanceNodeId: string, sessionId?: string) => Promise<void>
+  resumeSeedanceNode: (seedanceNodeId: string, sessionId?: string) => Promise<void>
+  cancelSeedanceNode: (seedanceNodeId: string, sessionId?: string) => void
+}
+
+function resetStuckSeedanceNode(node: WorkflowNode): WorkflowNode {
+  if (node.data.type !== NodeType.Seedance || node.data.status !== 'running')
+    return node
+
+  if (node.data.taskId)
+    return node
+
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      status: 'idle',
+      progress: undefined,
+      progressStartedAt: undefined,
+      error: undefined,
+      taskId: undefined,
+    },
+  }
+}
+
+function createRunSeedanceDeps(
+  get: () => WorkflowStoreInternal,
+  set: (partial: Partial<WorkflowStoreInternal> | ((state: WorkflowStoreInternal) => Partial<WorkflowStoreInternal>)) => void,
+  sessionId: string,
+): Parameters<typeof runSeedanceNodeSession>[2] {
+  return {
+    upsertLocalTask: useTaskQueueStore.getState().upsertLocalTask,
+    updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => {
+      get().updateNodeDataForSession(sessionId, nodeId, data)
+      set(state => ({
+        sessions: syncSessionRunningState(state.sessions, sessionId),
+      }))
+    },
+    appendOutputVideo: (nodeId: string, item: Omit<VideoHistoryItem, 'id'>) => {
+      get().appendOutputVideoForSession(sessionId, nodeId, item)
+    },
+    addLog: (entry: Omit<RunLogEntry, 'id' | 'timestamp'>) => {
+      get().addLogForSession(sessionId, entry)
+    },
+    clearLogs: () => {
+      get().clearLogsForSession(sessionId)
+    },
+    getNodes: () => get().sessions.find(s => s.id === sessionId)?.nodes ?? [],
+    getEdges: () => get().sessions.find(s => s.id === sessionId)?.edges ?? [],
+  }
+}
+
+async function executeSeedanceJob(
+  get: () => WorkflowStoreInternal,
+  set: (partial: Partial<WorkflowStoreInternal> | ((state: WorkflowStoreInternal) => Partial<WorkflowStoreInternal>)) => void,
+  sessionId: string,
+  seedanceNodeId: string,
+  mode: 'run' | 'resume',
+) {
+  if (isSeedanceJobInflight(sessionId, seedanceNodeId))
+    return
+
+  const session = get().sessions.find(s => s.id === sessionId)
+  if (!session)
+    return
+
+  const target = session.nodes.find(n => n.id === seedanceNodeId)
+  if (!target || target.data.type !== NodeType.Seedance)
+    return
+
+  if (mode === 'run' && target.data.status === 'running')
+    return
+
+  if (mode === 'resume' && (target.data.status !== 'running' || !target.data.taskId))
+    return
+
+  const deps = createRunSeedanceDeps(get, set, sessionId)
+  const signal = beginSeedanceJob(sessionId, seedanceNodeId)
+  const options = { sessionId, signal, resume: mode === 'resume' }
+
+  try {
+    const latestSession = get().sessions.find(s => s.id === sessionId)
+    if (!latestSession)
+      return
+
+    if (mode === 'resume') {
+      await resumeSeedanceNodeSession(latestSession, seedanceNodeId, deps, options)
+    }
+    else {
+      await runSeedanceNodeSession(latestSession, seedanceNodeId, deps, options)
+    }
+  }
+  catch (error) {
+    handleSeedanceSessionError(seedanceNodeId, target.data.title, deps, error, options)
+  }
+  finally {
+    finalizeSeedanceSessionJob(options, seedanceNodeId)
+    set(state => ({
+      sessions: syncSessionRunningState(state.sessions, sessionId),
+    }))
+  }
 }
 
 function syncSessionRunningState(sessions: WorkflowSession[], sessionId: string): WorkflowSession[] {
