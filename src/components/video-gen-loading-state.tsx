@@ -13,14 +13,24 @@ const RAINBOW_RGB: Array<[number, number, number]> = [
   [253, 224, 71],
 ]
 
+function positiveMod(value: number, divisor: number): number {
+  if (!Number.isFinite(value) || divisor <= 0)
+    return 0
+  return ((value % divisor) + divisor) % divisor
+}
+
 function sampleRainbowColor(x: number, y: number, w: number, h: number, t: number): string {
   const n = RAINBOW_RGB.length
-  const pos = ((x / w) * 1.2 + (y / h) * 0.8 + t * 0.15) % n
-  const i = Math.floor(pos) % n
+  if (w <= 0 || h <= 0)
+    return 'rgb(129, 140, 248)'
+
+  const raw = (x / w) * 1.2 + (y / h) * 0.8 + t * 0.15
+  const pos = positiveMod(raw, n)
+  const i = Math.min(n - 1, Math.floor(pos))
   const j = (i + 1) % n
   const frac = pos - Math.floor(pos)
-  const [r0, g0, b0] = RAINBOW_RGB[i]
-  const [r1, g1, b1] = RAINBOW_RGB[j]
+  const [r0, g0, b0] = RAINBOW_RGB[i]!
+  const [r1, g1, b1] = RAINBOW_RGB[j]!
   const r = Math.round(r0 + (r1 - r0) * frac)
   const g = Math.round(g0 + (g1 - g0) * frac)
   const b = Math.round(b0 + (b1 - b0) * frac)
@@ -75,15 +85,16 @@ export default function VideoGenLoadingState({
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
       canvas.width = Math.max(1, Math.floor(roundedWidth * dpr))
       canvas.height = Math.max(1, Math.floor(roundedHeight * dpr))
-      canvas.style.width = `${roundedWidth}px`
-      canvas.style.height = `${roundedHeight}px`
       return true
     }
 
+    const readSurfaceSize = () => ({
+      width: surface.clientWidth,
+      height: surface.clientHeight,
+    })
+
     const draw = (time: number) => {
-      const rect = surface.getBoundingClientRect()
-      const w = rect.width
-      const h = rect.height
+      const { width: w, height: h } = readSurfaceSize()
 
       if (!syncCanvasSize(w, h)) {
         animationId = requestAnimationFrame(draw)

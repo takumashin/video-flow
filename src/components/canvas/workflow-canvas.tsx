@@ -1,11 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactFlow, {
   Background,
   BackgroundVariant,
   SelectionMode,
   useReactFlow,
+  type HandleType,
   type NodeChange,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
@@ -13,12 +14,14 @@ import { FileAudio, FileVideo, ImagePlus } from 'lucide-react'
 import CustomEdge from './custom-edge'
 import CustomNode from './custom-node'
 import CanvasOperator from './operator'
+import ConnectNodeMenu, { resolveConnectNodePosition, type ConnectNodeMenuState } from './connect-node-menu'
 import SnapGuideLines from './snap-guide-lines'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
 import { useWorkflowStore } from '@/store/workflow-store'
 import { useThemeStore } from '@/store/theme-store'
 import type { WorkflowNode } from '@/lib/types'
 import { NodeType } from '@/lib/types'
+import type { ConnectHandleSide } from '@/lib/connect-node-options'
 import { getImageFiles, processImageFiles } from '@/lib/image-upload'
 import { processAudioFiles, processVideoFiles } from '@/lib/media-upload'
 import {
@@ -29,6 +32,7 @@ import {
 } from '@/lib/media-upload-shared'
 import { hasAssetDrag, readAssetDragData } from '@/lib/asset-drag'
 import { validateSeedanceConnection, type ConnectionEndpoints } from '@/lib/seedance-connection-rules'
+import { getConnectableNodeTypes } from '@/lib/connect-node-options'
 import { snapNodePosition, type SnapGuide } from '@/lib/node-snap'
 import { useAssetLibraryStore } from '@/store/asset-library-store'
 
@@ -86,6 +90,7 @@ function WorkflowCanvasInner() {
   const onNodesChange = useWorkflowStore(s => s.onNodesChange)
   const onEdgesChange = useWorkflowStore(s => s.onEdgesChange)
   const onConnect = useWorkflowStore(s => s.onConnect)
+  const addConnectedNode = useWorkflowStore(s => s.addConnectedNode)
   const selectNode = useWorkflowStore(s => s.selectNode)
   const openVideoHistoryModal = useWorkflowStore(s => s.openVideoHistoryModal)
   const addImageNode = useWorkflowStore(s => s.addImageNode)
@@ -94,6 +99,7 @@ function WorkflowCanvasInner() {
   const addLog = useWorkflowStore(s => s.addLog)
   const resolvedTheme = useThemeStore(s => s.resolvedTheme)
   const { screenToFlowPosition } = useReactFlow()
+  const containerRef = useRef<HTMLDivElement>(null)
   const selectedNodeId = activeSession?.selectedNodeId ?? null
   const flowNodes = nodes.map(node => ({
     ...node,
@@ -115,6 +121,98 @@ function WorkflowCanvasInner() {
   const draggingAssetKind = useAssetLibraryStore(s => s.draggingAssetKind)
   const setDraggingAssetKind = useAssetLibraryStore(s => s.setDraggingAssetKind)
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
+  const [connectMenu, setConnectMenu] = useState<ConnectNodeMenuState | null>(null)
+  const connectContextRef = useRef<{
+    nodeId: string
+    handleType: ConnectHandleSide
+  } | null>(null)
+  const connectSucceededRef = useRef(false)
+
+  const closeConnectMenu = useCallback(() => {
+    setConnectMenu(null)
+    connectContextRef.current = null
+  }, [])
+
+  const handleConnect = useCallback((connection: Parameters<typeof onConnect>[0]) => {
+    connectSucceededRef.current = true
+    onConnect(connection)
+  }, [onConnect])
+
+  const handleConnectStart = useCallback((
+    _: React.MouseEvent | React.TouchEvent,
+    params: { nodeId: string | null; handleType: HandleType | null },
+  ) => {
+    connectSucceededRef.current = false
+    if (!params.nodeId || !params.handleType)
+      return
+
+    connectContextRef.current = {
+      nodeId: params.nodeId,
+      handleType: params.handleType,
+    }
+  }, [])
+
+  const handleConnectEnd = useCallback((event: MouseEvent | TouchEvent) => {
+    const context = connectContextRef.current
+    connectContextRef.current = null
+
+    if (connectSucceededRef.current || !context || isRunning)
+      return
+
+    const clientX = 'clientX' in event ? event.clientX : event.changedTouches[0]?.clientX
+    const clientY = 'clientY' in event ? event.clientY : event.changedTouches[0]?.clientY
+    if (clientX == null || clientY == null)
+      return
+
+    const dropTarget = document.elementFromPoint(clientX, clientY)
+    if (!dropTarget?.closest('.react-flow__pane'))
+      return
+
+    if (dropTarget.closest('.react-flow__node') || dropTarget.closest('.react-flow__handle'))
+      return
+
+    const container = containerRef.current
+    if (!container)
+      return
+
+    const containerRect = container.getBoundingClientRect()
+    const menuState: ConnectNodeMenuState = {
+      anchorNodeId: context.nodeId,
+      handleType: context.handleType,
+      screenX: clientX - containerRect.left,
+      screenY: clientY - containerRect.top,
+      flowPosition: screenToFlowPosition({ x: clientX, y: clientY }),
+    }
+
+    const connectableTypes = getConnectableNodeTypes(
+      { nodeId: context.nodeId, handleType: context.handleType },
+      nodes,
+      edges,
+    )
+
+    if (connectableTypes.length === 1) {
+      addConnectedNode(
+        connectableTypes[0]!,
+        resolveConnectNodePosition(menuState, connectableTypes[0]!),
+        { nodeId: context.nodeId, handleType: context.handleType },
+      )
+      return
+    }
+
+    setConnectMenu(menuState)
+  }, [addConnectedNode, edges, isRunning, nodes, screenToFlowPosition])
+
+  const handleConnectNodeSelect = useCallback((
+    type: NodeType,
+    menu: ConnectNodeMenuState,
+  ) => {
+    addConnectedNode(
+      type,
+      resolveConnectNodePosition(menu, type),
+      { nodeId: menu.anchorNodeId, handleType: menu.handleType },
+    )
+    closeConnectMenu()
+  }, [addConnectedNode, closeConnectMenu])
 
   useEffect(() => {
     const clearFileDrag = () => {
@@ -157,8 +255,9 @@ function WorkflowCanvasInner() {
   )
 
   const onPaneClick = useCallback(() => {
+    closeConnectMenu()
     selectNode(null)
-  }, [selectNode])
+  }, [closeConnectMenu, selectNode])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: WorkflowNode) => {
     selectNode(node.id)
@@ -320,14 +419,17 @@ function WorkflowCanvasInner() {
   const OverlayIcon = overlayIcon
 
   return (
-    <div id="workflow-container" className="relative h-full w-full">
+    <div id="workflow-container" ref={containerRef} className="relative h-full w-full">
       <ReactFlow
         nodes={flowNodes}
         edges={flowEdges}
         onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
+        onConnect={handleConnect}
+        onConnectStart={handleConnectStart}
+        onConnectEnd={handleConnectEnd}
         isValidConnection={isValidConnection}
+        nodesConnectable={!isRunning}
         onPaneClick={onPaneClick}
         onNodeClick={onNodeClick}
         onDragOver={onDragOver}
@@ -362,6 +464,14 @@ function WorkflowCanvasInner() {
           </div>
         </div>
       )}
+
+      <ConnectNodeMenu
+        menu={connectMenu}
+        nodes={nodes}
+        edges={edges}
+        onSelect={handleConnectNodeSelect}
+        onClose={closeConnectMenu}
+      />
 
     </div>
   )

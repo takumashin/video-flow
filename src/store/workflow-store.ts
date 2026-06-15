@@ -10,6 +10,8 @@ import { v4 as uuidv4 } from 'uuid'
 import type { ImageRole, RunLogEntry, SeedanceGenerationMode, VideoHistoryItem, WorkflowEdge, WorkflowNode, WorkflowNodeData } from '@/lib/types'
 import { NodeType } from '@/lib/types'
 import { pruneSeedanceUpstreamEdges, validateSeedanceConnection, applySeedanceImageRolesForMode, normalizeWorkflowImageRoles } from '@/lib/seedance-connection-rules'
+import { buildConnectionForNewNode, inferSeedanceGenerationModeForNewNode, type ConnectHandleSide } from '@/lib/connect-node-options'
+import { getRecommendedModelForModeChange, shouldDisableAudio } from '@/lib/seedance-models'
 import {
   readSeedanceNodePrompt,
   updatePromptAfterAudioRemoval,
@@ -70,6 +72,11 @@ type WorkflowStore = {
   disconnectUpstreamVideo: (seedanceNodeId: string, videoNodeId: string) => void
   disconnectUpstreamAudio: (seedanceNodeId: string, audioNodeId: string) => void
   addNode: (type: NodeType, position?: { x: number; y: number }) => void
+  addConnectedNode: (
+    type: NodeType,
+    position: { x: number; y: number },
+    anchor: { nodeId: string; handleType: ConnectHandleSide },
+  ) => void
   addImageNode: (imageUrl: string, position?: { x: number; y: number }, role?: ImageRole) => void
   addVideoNode: (mediaUrl: string, position?: { x: number; y: number }) => void
   addAudioNode: (mediaUrl: string, position?: { x: number; y: number }) => void
@@ -81,7 +88,95 @@ type WorkflowStore = {
   setSessionWorkflowMeta: (sessionId: string, workflowId: string, name: string) => void
   runSeedanceNode: (seedanceNodeId: string, sessionId?: string) => Promise<void>
   resumeSeedanceNode: (seedanceNodeId: string, sessionId?: string) => Promise<void>
+  resumeStuckSeedanceJobs: () => void
   cancelSeedanceNode: (seedanceNodeId: string, sessionId?: string) => void
+}
+
+function createWorkflowNode(
+  type: NodeType,
+  session: WorkflowSession,
+  position?: { x: number; y: number },
+): WorkflowNode {
+  const id = `${type}-${uuidv4().slice(0, 8)}`
+  const count = session.nodes.filter(n => n.data.type === type).length
+  const baseData = createNodeData(type)
+  const title = count > 0 ? `${baseData.title} ${count + 1}` : baseData.title
+
+  return {
+    id,
+    type: 'custom',
+    position: position ?? { x: 120 + session.nodes.length * 40, y: 120 + session.nodes.length * 30 },
+    data: { ...baseData, title },
+  }
+}
+
+function configureConnectedSeedanceNode(
+  newNode: WorkflowNode,
+  anchorNode: WorkflowNode,
+  handleType: ConnectHandleSide,
+): WorkflowNode {
+  if (newNode.data.type !== NodeType.Seedance)
+    return newNode
+
+  const generationMode = inferSeedanceGenerationModeForNewNode(anchorNode, handleType)
+  const model = getRecommendedModelForModeChange(generationMode, newNode.data.model)
+  const generateAudio = shouldDisableAudio(model) ? false : newNode.data.generateAudio
+
+  return {
+    ...newNode,
+    data: {
+      ...newNode.data,
+      generationMode,
+      model,
+      generateAudio,
+    },
+  }
+}
+
+function applyWorkflowConnection(
+  connection: Connection,
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+  log: (entry: Omit<RunLogEntry, 'id' | 'timestamp'>) => void,
+): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } | null {
+  const target = nodes.find(n => n.id === connection.target)
+  const source = nodes.find(n => n.id === connection.source)
+
+  const connectionCheck = validateSeedanceConnection(connection, nodes, edges)
+  if (!connectionCheck.ok) {
+    log({
+      nodeId: connection.target ?? 'system',
+      nodeTitle: target?.data.title ?? 'Seedance 生成',
+      message: connectionCheck.reason,
+      level: 'error',
+    })
+    return null
+  }
+
+  let nextNodes = nodes
+
+  if (
+    target?.data.type === NodeType.Seedance
+    && source?.data.type === NodeType.TextPrompt
+    && source.data.prompt.trim()
+    && !readSeedanceNodePrompt(target.data)
+  ) {
+    const importedPrompt = source.data.prompt
+    nextNodes = nodes.map(node =>
+      node.id === target.id && node.data.type === NodeType.Seedance
+        ? { ...node, data: { ...node.data, prompt: importedPrompt } }
+        : node,
+    )
+  }
+
+  const nextEdges = addEdge({ ...connection, type: 'custom' }, edges)
+
+  if (target?.data.type === NodeType.Seedance) {
+    const mode = target.data.generationMode ?? 'text_to_video'
+    nextNodes = applySeedanceImageRolesForMode(target.id, mode, nextNodes, nextEdges)
+  }
+
+  return { nodes: nextNodes, edges: nextEdges }
 }
 
 function resetStuckSeedanceNode(node: WorkflowNode): WorkflowNode {
@@ -128,6 +223,26 @@ function createRunSeedanceDeps(
     },
     getNodes: () => get().sessions.find(s => s.id === sessionId)?.nodes ?? [],
     getEdges: () => get().sessions.find(s => s.id === sessionId)?.edges ?? [],
+  }
+}
+
+function resumeStuckSeedanceJobsForStore(
+  get: () => WorkflowStoreInternal,
+  set: (partial: Partial<WorkflowStoreInternal> | ((state: WorkflowStoreInternal) => Partial<WorkflowStoreInternal>)) => void,
+) {
+  for (const session of get().sessions) {
+    for (const node of session.nodes) {
+      if (
+        node.data.type !== NodeType.Seedance
+        || node.data.status !== 'running'
+        || !node.data.taskId
+        || isSeedanceJobInflight(session.id, node.id)
+      ) {
+        continue
+      }
+
+      void executeSeedanceJob(get, set, session.id, node.id, 'resume')
+    }
   }
 }
 
@@ -384,45 +499,20 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()(
         if (!session)
           return
 
-        const { nodes, edges } = session
-        const target = nodes.find(n => n.id === connection.target)
-        const source = nodes.find(n => n.id === connection.source)
-
-        const connectionCheck = validateSeedanceConnection(connection, nodes, edges)
-        if (!connectionCheck.ok) {
-          get().addLogForSession(activeSessionId, {
-            nodeId: connection.target ?? 'system',
-            nodeTitle: target?.data.title ?? 'Seedance 生成',
-            message: connectionCheck.reason,
-            level: 'error',
-          })
+        const result = applyWorkflowConnection(
+          connection,
+          session.nodes,
+          session.edges,
+          entry => get().addLogForSession(activeSessionId, entry),
+        )
+        if (!result)
           return
-        }
 
-        let nextNodes = nodes
-
-        if (
-          target?.data.type === NodeType.Seedance
-          && source?.data.type === NodeType.TextPrompt
-          && source.data.prompt.trim()
-          && !readSeedanceNodePrompt(target.data)
-        ) {
-          const importedPrompt = source.data.prompt
-          nextNodes = nodes.map(node =>
-            node.id === target.id && node.data.type === NodeType.Seedance
-              ? { ...node, data: { ...node.data, prompt: importedPrompt } }
-              : node,
-          )
-        }
-
-        const nextEdges = addEdge({ ...connection, type: 'custom' }, edges)
-
-        if (target?.data.type === NodeType.Seedance) {
-          const mode = target.data.generationMode ?? 'text_to_video'
-          nextNodes = applySeedanceImageRolesForMode(target.id, mode, nextNodes, nextEdges)
-        }
-
-        get().patchSession(activeSessionId, s => ({ ...s, nodes: nextNodes, edges: nextEdges }))
+        get().patchSession(activeSessionId, s => ({
+          ...s,
+          nodes: result.nodes,
+          edges: result.edges,
+        }))
       },
 
       selectNode: nodeId => {
@@ -652,22 +742,49 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()(
         if (!session)
           return
 
-        const id = `${type}-${uuidv4().slice(0, 8)}`
-        const count = session.nodes.filter(n => n.data.type === type).length
-        const baseData = createNodeData(type)
-        const title = count > 0 ? `${baseData.title} ${count + 1}` : baseData.title
+        const newNode = createWorkflowNode(type, session, position)
 
         get().patchSession(activeSessionId, s => ({
           ...s,
-          nodes: [
-            ...s.nodes,
-            {
-              id,
-              type: 'custom',
-              position: position ?? { x: 120 + s.nodes.length * 40, y: 120 + s.nodes.length * 30 },
-              data: { ...baseData, title },
-            },
-          ],
+          nodes: [...s.nodes, newNode],
+        }))
+      },
+
+      addConnectedNode: (type, position, anchor) => {
+        const { activeSessionId } = get()
+        const session = getActiveSession(get())
+        if (!session)
+          return
+
+        const anchorNode = session.nodes.find(node => node.id === anchor.nodeId)
+        if (!anchorNode)
+          return
+
+        const newNode = configureConnectedSeedanceNode(
+          createWorkflowNode(type, session, position),
+          anchorNode,
+          anchor.handleType,
+        )
+        const endpoints = buildConnectionForNewNode(anchor.nodeId, newNode.id, anchor.handleType)
+        const connection: Connection = {
+          ...endpoints,
+          sourceHandle: null,
+          targetHandle: null,
+        }
+        const result = applyWorkflowConnection(
+          connection,
+          [...session.nodes, newNode],
+          session.edges,
+          entry => get().addLogForSession(activeSessionId, entry),
+        )
+        if (!result)
+          return
+
+        get().patchSession(activeSessionId, s => ({
+          ...s,
+          selectedNodeId: newNode.id,
+          nodes: result.nodes,
+          edges: result.edges,
         }))
       },
 
@@ -820,58 +937,21 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()(
 
       runSeedanceNode: async (seedanceNodeId, sessionId) => {
         const id = sessionId ?? get().activeSessionId
-        const session = get().sessions.find(s => s.id === id)
-        if (!session)
-          return
+        await executeSeedanceJob(get, set, id, seedanceNodeId, 'run')
+      },
 
-        const target = session.nodes.find(n => n.id === seedanceNodeId)
-        if (!target || target.data.type !== NodeType.Seedance)
-          return
+      resumeSeedanceNode: async (seedanceNodeId, sessionId) => {
+        const id = sessionId ?? get().activeSessionId
+        await executeSeedanceJob(get, set, id, seedanceNodeId, 'resume')
+      },
 
-        if (target.data.status === 'running')
-          return
+      resumeStuckSeedanceJobs: () => {
+        resumeStuckSeedanceJobsForStore(get, set)
+      },
 
-        const deps = {
-          upsertLocalTask: useTaskQueueStore.getState().upsertLocalTask,
-          updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => {
-            get().updateNodeDataForSession(id, nodeId, data)
-            set(state => ({
-              sessions: syncSessionRunningState(state.sessions, id),
-            }))
-          },
-          appendOutputVideo: (nodeId: string, item: Omit<VideoHistoryItem, 'id'>) => {
-            get().appendOutputVideoForSession(id, nodeId, item)
-          },
-          addLog: (entry: Omit<RunLogEntry, 'id' | 'timestamp'>) => {
-            get().addLogForSession(id, entry)
-          },
-          clearLogs: () => {
-            get().clearLogsForSession(id)
-          },
-          getNodes: () => get().sessions.find(s => s.id === id)?.nodes ?? [],
-          getEdges: () => get().sessions.find(s => s.id === id)?.edges ?? [],
-        }
-
-        try {
-          const latestSession = get().sessions.find(s => s.id === id)
-          if (!latestSession)
-            return
-          await runSeedanceNodeSession(latestSession, seedanceNodeId, deps)
-        }
-        catch (error) {
-          const message = error instanceof Error ? error.message : '运行失败'
-          deps.addLog({
-            nodeId: seedanceNodeId,
-            nodeTitle: target.data.title,
-            message,
-            level: 'error',
-          })
-        }
-        finally {
-          set(state => ({
-            sessions: syncSessionRunningState(state.sessions, id),
-          }))
-        }
+      cancelSeedanceNode: (seedanceNodeId, sessionId) => {
+        const id = sessionId ?? get().activeSessionId
+        cancelSeedanceJob(id, seedanceNodeId)
       },
     }),
     {
@@ -916,11 +996,18 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()(
           runLogs: [],
           selectedNodeId: null,
           videoHistoryModalNodeId: null,
-          nodes: normalizeWorkflowImageRoles(session.nodes, session.edges),
+          nodes: normalizeWorkflowImageRoles(
+            session.nodes.map(resetStuckSeedanceNode),
+            session.edges,
+          ),
         }))
 
         if (!state.sessions.some(s => s.id === state.activeSessionId))
           state.activeSessionId = state.sessions[0]?.id ?? initialSession.id
+
+        queueMicrotask(() => {
+          useWorkflowStore.getState().resumeStuckSeedanceJobs()
+        })
       },
     },
   ),

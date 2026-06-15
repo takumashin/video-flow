@@ -9,6 +9,7 @@ import {
   shouldDisableAudio,
 } from '@/lib/seedance-models'
 import { getSeedanceUpstreamRefs } from '@/lib/seedance-upstream'
+import { isSeedanceJobInflight } from '@/lib/seedance-generation-control'
 import { SEEDANCE_MODE_OPTIONS } from '@/lib/seedance-modes'
 import { useFakeSeedanceProgress } from '@/lib/use-fake-seedance-progress'
 import { useWorkflowStore } from '@/store/workflow-store'
@@ -31,6 +32,44 @@ type SeedancePanelProps = {
   disabled: boolean
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+}
+
+function SeedanceGenerateButton({ id, data }: { id: string; data: SeedanceNodeData }) {
+  const activeSessionId = useWorkflowStore(s => s.activeSessionId)
+  const isGenerating = data.status === 'running'
+  const isJobActive = isSeedanceJobInflight(activeSessionId, id)
+  const isStuckGenerating = isGenerating && !isJobActive
+  const displayProgress = useFakeSeedanceProgress(
+    data.progressStartedAt,
+    isGenerating ? 'running' : data.status,
+    data.progress,
+  )
+
+  return (
+    <button
+      type="button"
+      disabled={isGenerating && isJobActive}
+      onClick={() => {
+        const store = useWorkflowStore.getState()
+        if (isStuckGenerating)
+          void store.resumeSeedanceNode(id)
+        else
+          void store.runSeedanceNode(id)
+      }}
+      className="nodrag inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[#104BD4] disabled:opacity-60"
+    >
+      {isStuckGenerating
+        ? <Play className="h-4 w-4" />
+        : isGenerating
+          ? <Loader2 className="h-4 w-4 animate-spin" />
+          : <Play className="h-4 w-4" />}
+      {isStuckGenerating
+        ? '恢复进度'
+        : isGenerating
+          ? (displayProgress != null ? `生成中 ${displayProgress}%` : '生成中...')
+          : '生成视频'}
+    </button>
+  )
 }
 
 export function SeedanceNodeSummary({
@@ -96,8 +135,10 @@ export function SeedanceNodeSummary({
         />
       )}
 
+      <SeedanceGenerateButton id={id} data={data} />
+
       {!selected && !isGenerating && (
-        <p className="text-[10px] text-muted/80">点击节点后在右侧栏配置</p>
+        <p className="text-[10px] text-muted/80">点击节点后在右侧栏编辑参数</p>
       )}
     </div>
   )
@@ -115,12 +156,6 @@ export function SeedanceNodeDetailPanel({
   const updateNodeData = useWorkflowStore(s => s.updateNodeData)
   const pruneSeedanceEdgesForMode = useWorkflowStore(s => s.pruneSeedanceEdgesForMode)
   const upstreamRefs = getSeedanceUpstreamRefs(id, nodes, edges)
-  const isGenerating = data.status === 'running'
-  const displayProgress = useFakeSeedanceProgress(
-    data.progressStartedAt,
-    isGenerating ? 'running' : data.status,
-    data.progress,
-  )
 
   return (
     <div
@@ -226,19 +261,6 @@ export function SeedanceNodeDetailPanel({
             disabled={disabled}
           />
         </div>
-        <button
-          type="button"
-          disabled={disabled || isGenerating}
-          onClick={() => useWorkflowStore.getState().runSeedanceNode(id)}
-          className="nodrag inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[#104BD4] disabled:opacity-60"
-        >
-          {isGenerating
-            ? <Loader2 className="h-4 w-4 animate-spin" />
-            : <Play className="h-4 w-4" />}
-          {isGenerating
-            ? (displayProgress != null ? `生成中 ${displayProgress}%` : '生成中...')
-            : '生成视频'}
-        </button>
       </div>
     </div>
   )

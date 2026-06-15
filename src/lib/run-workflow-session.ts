@@ -113,6 +113,24 @@ async function pollAndCompleteSeedanceTask(
     throw new Error('生成成功但未返回视频地址')
   }
 
+  deps.updateNodeData(node.id, {
+    status: 'succeeded',
+    taskId,
+    progress: 100,
+    progressStartedAt: undefined,
+    error: undefined,
+  })
+  deps.upsertLocalTask({
+    id: taskId,
+    taskId,
+    prompt,
+    nodeTitle: node.data.title,
+    status: 'succeeded',
+    progress: 100,
+    videoUrl: remoteVideoUrl,
+    createdAt: progressStartedAt,
+  })
+
   let finalVideoUrl: string = remoteVideoUrl
 
   try {
@@ -132,23 +150,18 @@ async function pollAndCompleteSeedanceTask(
     console.error('保存视频到本地失败，将使用远程 URL:', saveError)
   }
 
-  deps.updateNodeData(node.id, {
-    status: 'succeeded',
-    taskId,
-    progress: 100,
-    progressStartedAt: undefined,
-    error: undefined,
-  })
-  deps.upsertLocalTask({
-    id: taskId,
-    taskId,
-    prompt,
-    nodeTitle: node.data.title,
-    status: 'succeeded',
-    progress: 100,
-    videoUrl: finalVideoUrl,
-    createdAt: progressStartedAt,
-  })
+  if (finalVideoUrl !== remoteVideoUrl) {
+    deps.upsertLocalTask({
+      id: taskId,
+      taskId,
+      prompt,
+      nodeTitle: node.data.title,
+      status: 'succeeded',
+      progress: 100,
+      videoUrl: finalVideoUrl,
+      createdAt: progressStartedAt,
+    })
+  }
 
   deps.addLog({
     nodeId: node.id,
@@ -206,7 +219,7 @@ export async function resumeSeedanceNodeSession(
   })
 
   await pollAndCompleteSeedanceTask(
-    node,
+    { id: node.id, data: node.data },
     deps,
     {
       taskId: node.data.taskId,
@@ -330,11 +343,11 @@ export async function runSeedanceNodeSession(
   })
 
   await pollAndCompleteSeedanceTask(
-    node,
+    { id: node.id, data: node.data },
     deps,
     {
       taskId,
-      prompt: inputs.prompt,
+      prompt: inputs.prompt ?? node.data.prompt ?? '',
       progressStartedAt,
       signal: options.signal,
     },
