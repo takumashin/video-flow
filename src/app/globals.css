@@ -1,26 +1,363 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f2f4f7;
+  --foreground: #101828;
+  --surface: #ffffff;
+  --surface-muted: #f9fafb;
+  --surface-elevated: #ffffff;
+  --border: #e4e7ec;
+  --border-subtle: #f2f4f7;
+  --text-secondary: #667085;
+  --text-muted: #98a2b3;
+  --input-bg: #ffffff;
+  --canvas-dot: #d0d5dd;
+  --primary: #155eef;
+  --primary-light: #528bff;
+  --minimap-mask: rgba(240, 244, 248, 0.72);
+  --minimap-bg: #f9fafb;
+  --overlay: rgba(16, 24, 40, 0.45);
+}
+
+.dark {
+  --background: #0a0c10;
+  --foreground: #eceff4;
+  --surface: #141820;
+  --surface-muted: #1a1f28;
+  --surface-elevated: #1c2129;
+  --border: #2e3440;
+  --border-subtle: #232830;
+  --text-secondary: #9aa4b2;
+  --text-muted: #6b7280;
+  --input-bg: #1a1f28;
+  --canvas-dot: #2a3140;
+  --primary: #3b82f6;
+  --primary-light: #60a5fa;
+  --minimap-mask: rgba(10, 12, 16, 0.78);
+  --minimap-bg: #1a1f28;
+  --overlay: rgba(0, 0, 0, 0.65);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-secondary: var(--text-secondary);
+  --color-muted: var(--text-muted);
+  --color-input: var(--input-bg);
+  --color-canvas-dot: var(--canvas-dot);
+  --color-primary: var(--primary);
+  --color-primary-light: var(--primary-light);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+#workflow-container {
+  isolation: isolate;
+  z-index: 0;
+}
+
+#workflow-container .react-flow {
+  background: var(--background);
+}
+
+#workflow-container .react-flow__nodesselection-rect,
+#workflow-container .react-flow__selection {
+  border: 1px solid var(--primary-light);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+#workflow-container .react-flow__attribution {
+  display: none;
+}
+
+/* 节点默认箭头；标题栏与空白区域可拖节点（nodrag 子元素除外） */
+#workflow-container .react-flow__node {
+  cursor: grab;
+}
+
+#workflow-container .react-flow__node.dragging {
+  cursor: grabbing;
+}
+
+#workflow-container .node-drag-header {
+  cursor: grab;
+}
+
+#workflow-container .react-flow__node.dragging .node-drag-header {
+  cursor: grabbing;
+}
+
+#workflow-container .nodrag input:not([type='range']):not([type='checkbox']):not([type='radio']):not([type='button']):not([type='submit']),
+#workflow-container .nodrag textarea,
+#workflow-container .nodrag .prompt-editor,
+#workflow-container .nodrag [contenteditable='true'] {
+  cursor: text;
+}
+
+#workflow-container .nodrag button,
+#workflow-container .nodrag a[href],
+#workflow-container .nodrag label,
+#workflow-container .nodrag [role='button'] {
+  cursor: pointer;
+}
+
+#workflow-container .nodrag input[type='range'] {
+  cursor: pointer;
+}
+
+#workflow-container .nodrag button:disabled,
+#workflow-container .nodrag input:disabled,
+#workflow-container .nodrag textarea:disabled,
+#workflow-container .nodrag .prompt-editor[contenteditable='false'] {
+  cursor: not-allowed;
+}
+
+#workflow-container .react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+#workflow-container .workflow-edge-hitarea {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+#workflow-container .workflow-edge-path {
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+#workflow-container .workflow-edge-path-active {
+  stroke: color-mix(in srgb, var(--text-secondary) 55%, var(--border));
+  stroke-width: 2;
+}
+
+@keyframes workflow-edge-flow-run {
+  to {
+    stroke-dashoffset: -2000;
+  }
+}
+
+#workflow-container .workflow-edge-flow {
+  animation: workflow-edge-flow-run 2.2s linear infinite;
+  pointer-events: none;
+}
+
+.task-progress-bar-fill {
+  background: linear-gradient(
+    90deg,
+    #f472b6 0%,
+    #c084fc 22%,
+    #818cf8 42%,
+    #38bdf8 62%,
+    #34d399 82%,
+    #fde047 100%
+  );
+}
+
+@keyframes workflow-edge-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    stroke-width: 6;
+  }
+
+  50% {
+    opacity: 0.75;
+    stroke-width: 10;
+  }
+}
+
+@keyframes workflow-edge-glow-core {
+  0%,
+  100% {
+    opacity: 0.55;
+    stroke-width: 2.5;
+  }
+
+  50% {
+    opacity: 1;
+    stroke-width: 3.5;
+  }
+}
+
+@keyframes workflow-edge-node-glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 4px color-mix(in srgb, var(--primary-light) 50%, transparent);
+    transform: scale(1);
+  }
+
+  50% {
+    box-shadow:
+      0 0 6px var(--primary-light),
+      0 0 12px color-mix(in srgb, var(--primary-light) 65%, transparent);
+    transform: scale(1.15);
+  }
+}
+
+#workflow-container .workflow-edge-glow-outer {
+  animation: workflow-edge-glow-pulse 1.6s ease-in-out infinite;
+  filter:
+    drop-shadow(0 0 4px color-mix(in srgb, var(--primary-light) 70%, transparent))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--primary-light) 45%, transparent));
+  pointer-events: none;
+}
+
+#workflow-container .workflow-edge-glow-inner {
+  animation: workflow-edge-glow-core 1.6s ease-in-out infinite;
+  filter: drop-shadow(0 0 3px var(--primary-light));
+  pointer-events: none;
+}
+
+#workflow-container .workflow-edge-node-glow {
+  animation: workflow-edge-node-glow-pulse 1.6s ease-in-out infinite;
+}
+
+#workflow-container input[type='range']::-moz-range-thumb {
+  height: 0.875rem;
+  width: 0.875rem;
+  border: none;
+  border-radius: 9999px;
+  background: var(--primary-light);
+}
+
+#workflow-container .canvas-operator-minimap.react-flow__panel {
+  position: static;
+  margin: 0;
+  transform: none;
+}
+
+#workflow-container .react-flow__minimap {
+  background-color: var(--minimap-bg);
+}
+
+/* 视频描述：contenteditable + 内联 chip */
+.prompt-editor {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  max-height: 12rem;
+  font-size: 0.75rem;
+  line-height: 1.625;
+}
+
+.prompt-editor:focus {
+  outline: none;
+}
+
+.prompt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  margin: 0 0.0625rem;
+  max-width: 100%;
+  height: 1.125rem;
+  box-sizing: border-box;
+  vertical-align: middle;
+  border-radius: 0.25rem;
+  border: 1px solid color-mix(in srgb, #8b5cf6 35%, transparent);
+  background: color-mix(in srgb, #8b5cf6 12%, transparent);
+  padding: 0 0.25rem 0 0.125rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1;
+  color: #6d28d9;
+  user-select: none;
+}
+
+.dark .prompt-chip {
+  border-color: color-mix(in srgb, #a78bfa 40%, transparent);
+  background: color-mix(in srgb, #8b5cf6 18%, transparent);
+  color: #c4b5fd;
+}
+
+.prompt-chip-video {
+  border-color: color-mix(in srgb, #0ea5e9 35%, transparent);
+  background: color-mix(in srgb, #0ea5e9 12%, transparent);
+  color: #0369a1;
+}
+
+.dark .prompt-chip-video {
+  border-color: color-mix(in srgb, #38bdf8 40%, transparent);
+  background: color-mix(in srgb, #0ea5e9 18%, transparent);
+  color: #7dd3fc;
+}
+
+.prompt-chip-audio {
+  border-color: color-mix(in srgb, #10b981 35%, transparent);
+  background: color-mix(in srgb, #10b981 12%, transparent);
+  color: #047857;
+}
+
+.dark .prompt-chip-audio {
+  border-color: color-mix(in srgb, #34d399 40%, transparent);
+  background: color-mix(in srgb, #10b981 18%, transparent);
+  color: #6ee7b7;
+}
+
+.prompt-chip-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 0.875rem;
+  width: 0.875rem;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 0.125rem;
+  background: color-mix(in srgb, #8b5cf6 20%, transparent);
+}
+
+.prompt-chip-thumb img {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+
+.prompt-chip-thumb video {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.prompt-chip-thumb-video,
+.prompt-chip-thumb-audio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: inherit;
+}
+
+.prompt-chip-thumb-audio {
+  background: color-mix(in srgb, #10b981 22%, transparent);
+}
+
+.prompt-chip-thumb-video {
+  background: color-mix(in srgb, #0ea5e9 22%, transparent);
+}
+
+.prompt-chip-name {
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1;
+  font-size: inherit;
 }
