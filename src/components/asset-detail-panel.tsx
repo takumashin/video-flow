@@ -3,6 +3,7 @@
 import { ArrowLeft, Music, Plus } from 'lucide-react'
 import MediaPreviewImage from '@/components/media-preview-image'
 import { MediaPreviewExpandButton } from '@/components/media-preview-modal'
+import MenuSelect from '@/components/menu-select'
 import { openMediaPreview } from '@/store/media-preview-store'
 import { cn } from '@/lib/cn'
 import type { UploadAssetKind } from '@/lib/uploads'
@@ -14,6 +15,12 @@ export type AssetDetailItem = {
   filename: string
   size: number
   createdAt: number
+  folderId: string | null
+}
+
+type AssetFolderOption = {
+  id: string
+  name: string
 }
 
 type AssetDetailPanelProps = {
@@ -21,9 +28,12 @@ type AssetDetailPanelProps = {
   kindLabel: string
   formattedSize: string
   formattedTime: string
+  folders: AssetFolderOption[]
+  movingFolder: boolean
   disabled: boolean
   onBack: () => void
   onAddToWorkflow: () => void
+  onMoveToFolder: (folderId: string | null) => void
 }
 
 export default function AssetDetailPanel({
@@ -31,10 +41,18 @@ export default function AssetDetailPanel({
   kindLabel,
   formattedSize,
   formattedTime,
+  folders,
+  movingFolder,
   disabled,
   onBack,
   onAddToWorkflow,
+  onMoveToFolder,
 }: AssetDetailPanelProps) {
+  const folderOptions = [
+    { value: '', label: '未分类' },
+    ...folders.map(folder => ({ value: folder.id, label: folder.name })),
+  ]
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border-subtle px-2 py-2">
@@ -107,6 +125,20 @@ export default function AssetDetailPanel({
           <div>
             <dt className="text-[10px] text-muted">大小</dt>
             <dd className="mt-0.5 text-foreground">{formattedSize}</dd>
+          </div>
+          <div>
+            <dt className="text-[10px] text-muted">文件夹</dt>
+            <dd className="mt-0.5">
+              <MenuSelect
+                value={item.folderId ?? ''}
+                options={folderOptions}
+                disabled={disabled}
+                loading={movingFolder}
+                aria-label="选择文件夹"
+                menuPlacement="above"
+                onChange={value => onMoveToFolder(value || null)}
+              />
+            </dd>
           </div>
           <div>
             <dt className="text-[10px] text-muted">上传时间</dt>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Camera, Pause, Play, Volume2, VolumeX } from 'lucide-react'
 import { MediaPreviewExpandButton } from '@/components/media-preview-modal'
 import { formatMediaTime } from '@/lib/format-media-time'
+import { useVideoPoster } from '@/lib/use-video-poster'
 import { cn } from '@/lib/cn'
 
 type NodeVideoPlayerProps = {
@@ -30,6 +31,8 @@ export default function NodeVideoPlayer({
   const [volume, setVolume] = useState(0.8)
   const [muted, setMuted] = useState(false)
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
+  const framePoster = useVideoPoster(src, poster)
+  const showFramePoster = !!framePoster && !playing
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0
 
@@ -69,6 +72,20 @@ export default function NodeVideoPlayer({
     video.volume = volume
     video.muted = muted
   }, [volume, muted])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || framePoster)
+      return
+
+    const seekToFirstFrame = () => {
+      if (video.currentTime < 0.01)
+        video.currentTime = 0.001
+    }
+
+    video.addEventListener('loadeddata', seekToFirstFrame, { once: true })
+    return () => video.removeEventListener('loadeddata', seekToFirstFrame)
+  }, [src, framePoster])
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current
@@ -131,12 +148,25 @@ export default function NodeVideoPlayer({
         ref={videoRef}
         key={src}
         src={src}
-        poster={poster}
+        poster={framePoster}
         playsInline
-        preload="none"
-        className="node-media absolute inset-0 h-full w-full bg-black object-contain"
+        preload="metadata"
+        className={cn(
+          'node-media absolute inset-0 h-full w-full bg-black object-contain',
+          showFramePoster && 'opacity-0',
+        )}
         onClick={togglePlay}
       />
+
+      {showFramePoster && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={framePoster}
+          alt=""
+          className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+          decoding="async"
+        />
+      )}
 
       {!playing && (
         <button

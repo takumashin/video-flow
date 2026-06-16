@@ -8,10 +8,12 @@ export type WorkflowSession = {
   name: string
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  revision: number | null
   isRunning: boolean
   runLogs: RunLogEntry[]
   selectedNodeId: string | null
   videoHistoryModalNodeId: string | null
+  runLogPanelOpen: boolean
 }
 
 export const DEFAULT_WORKFLOW_NODES: WorkflowNode[] = [
@@ -33,30 +35,19 @@ export const DEFAULT_WORKFLOW_NODES: WorkflowNode[] = [
       watermark: false,
       cameraFixed: false,
       status: 'idle',
-    },
-  },
-  {
-    id: 'output-1',
-    type: 'custom',
-    position: { x: 600, y: 200 },
-    data: {
-      type: NodeType.Output,
-      title: '视频输出',
       videoHistory: [],
-      status: 'idle',
     },
   },
 ]
 
-export const DEFAULT_WORKFLOW_EDGES: WorkflowEdge[] = [
-  { id: 'e1', source: 'seedance-1', target: 'output-1', type: 'custom' },
-]
+export const DEFAULT_WORKFLOW_EDGES: WorkflowEdge[] = []
 
 export function createWorkflowSession(options?: {
   name?: string
   workflowId?: string | null
   nodes?: WorkflowNode[]
   edges?: WorkflowEdge[]
+  revision?: number | null
 }): WorkflowSession {
   return {
     id: uuidv4(),
@@ -64,10 +55,12 @@ export function createWorkflowSession(options?: {
     name: options?.name ?? '未命名工作流',
     nodes: structuredClone(options?.nodes ?? DEFAULT_WORKFLOW_NODES),
     edges: structuredClone(options?.edges ?? DEFAULT_WORKFLOW_EDGES),
+    revision: options?.revision ?? null,
     isRunning: false,
     runLogs: [],
     selectedNodeId: null,
     videoHistoryModalNodeId: null,
+    runLogPanelOpen: false,
   }
 }
 

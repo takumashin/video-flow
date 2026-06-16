@@ -1,43 +1,38 @@
 'use client'
 
-import { Sparkles, ListOrdered } from 'lucide-react'
+import { ListOrdered } from 'lucide-react'
 import { SeedanceBrandText } from '@/components/seedance-brand-text'
-import AddBlockPanel from '@/components/canvas/add-block-panel'
-import AccountBalance from '@/components/account-balance'
-import ThemeToggle from '@/components/theme-toggle'
+import { SiteLogo } from '@/components/site-logo'
 import WorkflowManager from '@/components/workflow-manager'
+import WorkflowCollaborators from '@/components/workflow-collaborators'
+import WorkspaceSwitcher from '@/components/workspace-switcher'
+import { btnCompactClass } from '@/lib/ui-classes'
 import { useTaskQueueStore } from '@/store/task-queue-store'
 
 export default function StudioHeader() {
   const openTaskQueue = useTaskQueueStore(s => s.openPanel)
 
   return (
-    <header className="fixed inset-x-0 top-0 z-[100] flex h-14 items-center justify-between gap-4 border-b border-border bg-surface px-4 shadow-md">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-rose-500">
-          <Sparkles className="h-4 w-4 text-white" />
-        </div>
-        <div>
-          <h1 className="text-sm font-semibold text-foreground">
-            <SeedanceBrandText text="Seedance Studio" />
-          </h1>
-          <p className="text-xs text-muted">AI 视频生成工作流 · 火山引擎</p>
-        </div>
+    <header className="fixed inset-x-0 top-0 z-[100] flex h-12 items-center justify-between gap-3 border-b border-border bg-surface px-4 shadow-md">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <SiteLogo size={28} className="h-7 w-7 rounded-lg" />
+        <h1 className="truncate text-sm font-semibold text-foreground">
+          <SeedanceBrandText text="Seedance Studio" />
+        </h1>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-        <AccountBalance />
-        <ThemeToggle />
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <WorkflowCollaborators />
+        <WorkflowManager compact menuPlacement="below" />
         <button
           type="button"
           onClick={openTaskQueue}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition hover:bg-surface-muted"
+          className={btnCompactClass}
         >
-          <ListOrdered className="h-4 w-4" />
-          任务队列
+          <ListOrdered className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">任务队列</span>
         </button>
-        <WorkflowManager />
-        <AddBlockPanel />
+        <WorkspaceSwitcher compact menuPlacement="below" />
       </div>
     </header>
   )

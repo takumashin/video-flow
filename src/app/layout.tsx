@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
+import AuthSessionProvider from '@/components/auth-session-provider'
 import ThemeProvider from '@/components/theme-provider'
+import { SITE_LOGO_SRC } from '@/lib/site-logo'
 import './globals.css'
 
 const geistSans = Geist({
@@ -30,6 +32,10 @@ const themeInitScript = `
 export const metadata: Metadata = {
   title: 'Seedance Studio - AI 视频生成工作流',
   description: '基于 React Flow 的 AI 视频生成工具，接入火山引擎 Seedance API',
+  icons: {
+    icon: SITE_LOGO_SRC,
+    apple: SITE_LOGO_SRC,
+  },
 }
 
 export default function RootLayout({
@@ -47,7 +53,9 @@ export default function RootLayout({
         <script>{themeInitScript}</script>
       </head>
       <body className="h-full overflow-hidden bg-background text-foreground">
-        <ThemeProvider>{children}</ThemeProvider>
+        <AuthSessionProvider>
+          <ThemeProvider>{children}</ThemeProvider>
+        </AuthSessionProvider>
       </body>
     </html>
   )

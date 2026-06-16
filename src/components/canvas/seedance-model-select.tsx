@@ -3,9 +3,11 @@
 import { cn } from '@/lib/cn'
 import {
   CUSTOM_MODEL_VALUE,
+  DEFAULT_CUSTOM_MODEL_CREDIT_COST,
   getDefaultModelForMode,
   getModelOption,
   getModelsForMode,
+  getSeedanceModelCreditCost,
   isKnownModelId,
   shouldDisableAudio,
 } from '@/lib/seedance-models'
@@ -29,6 +31,9 @@ export function SeedanceModelSelect({
   const isCustom = model && !isKnownModelId(model)
   const selectValue = isCustom ? CUSTOM_MODEL_VALUE : (model || getDefaultModelForMode(mode))
   const activeModel = isCustom ? undefined : getModelOption(model)
+  const activeCost = isCustom
+    ? (model ? getSeedanceModelCreditCost(model) : DEFAULT_CUSTOM_MODEL_CREDIT_COST)
+    : getSeedanceModelCreditCost(model || getDefaultModelForMode(mode))
 
   const handleSelectChange = (value: string) => {
     if (value === CUSTOM_MODEL_VALUE) {
@@ -51,7 +56,7 @@ export function SeedanceModelSelect({
           options={[
             ...availableModels.map(item => ({
               value: item.id,
-              label: `${item.label} · ${item.id}`,
+              label: `${item.label} · ${item.creditCost} 点`,
             })),
             { value: CUSTOM_MODEL_VALUE, label: '自定义 Endpoint ID（ep-）' },
           ]}
@@ -75,6 +80,8 @@ export function SeedanceModelSelect({
         {activeModel?.description ?? (isCustom
           ? '火山方舟控制台创建的推理接入点 ID，格式 ep- 开头'
           : '根据当前生成模式筛选可用官方模型')}
+        {' · '}
+        <span className="font-medium text-foreground">每次生成消耗 {activeCost} 点</span>
         {activeModel?.docUrl && (
           <>
             {' · '}

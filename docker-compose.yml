@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: seedance-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: seedance
+      POSTGRES_PASSWORD: seedance
+      POSTGRES_DB: seedance_studio
+    ports:
+      # 映射到 5433，避免与本机 Homebrew PostgreSQL（5432）冲突
+      - '5433:5432'
+    volumes:
+      - seedance_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U seedance -d seedance_studio']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  seedance_pgdata:

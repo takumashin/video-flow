@@ -1,6 +1,7 @@
 'use client'
 
 import { cn } from '@/lib/cn'
+import { localizeSeedanceErrorMessage } from '@/lib/seedance-error-messages'
 import { useImeSafeTextValue } from '@/lib/use-ime-safe-text'
 import { inputClass } from '@/lib/ui-classes'
 import { SEEDANCE_MODE_OPTIONS } from '@/lib/seedance-modes'
@@ -62,6 +63,49 @@ export function NodeTextArea({
       disabled={disabled}
       className={cn(inputClass, 'resize-none')}
     />
+  )
+}
+
+export function NodeOptionGroup<T extends string>({
+  value,
+  onChange,
+  options,
+  disabled,
+  columns = 2,
+}: {
+  value: T
+  onChange: (value: T) => void
+  options: Array<{ value: T; label: string }>
+  disabled?: boolean
+  columns?: 1 | 2 | 3
+}) {
+  return (
+    <div
+      className={cn(
+        'nodrag grid gap-1.5',
+        columns === 3 ? 'grid-cols-3' : columns === 1 ? 'grid-cols-1' : 'grid-cols-2',
+      )}
+      role="radiogroup"
+    >
+      {options.map(option => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          disabled={disabled}
+          onClick={() => onChange(option.value)}
+          className={cn(
+            'rounded-md border px-2 py-1.5 text-xs font-medium transition disabled:opacity-50',
+            value === option.value
+              ? 'border-primary-light bg-primary/10 text-primary-light ring-1 ring-primary-light/25'
+              : 'border-border bg-input text-secondary hover:border-border hover:bg-surface-muted',
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -192,6 +236,7 @@ export function StatusBadge({
 
   const progressValue = progress != null ? Math.min(100, Math.max(0, progress)) : null
   const showProgress = progressValue != null && (status === 'running' || (progressValue > 0 && progressValue < 100))
+  const localizedError = localizeSeedanceErrorMessage(error)
 
   const labels = {
     idle: '待运行',
@@ -213,8 +258,8 @@ export function StatusBadge({
           任务 ID: {taskId}
         </p>
       )}
-      {error && (
-        <p className="rounded-md bg-red-500/10 p-2 text-[11px] text-red-600 dark:text-red-400">{error}</p>
+      {localizedError && (
+        <p className="break-all rounded-md bg-red-500/10 p-2 text-[11px] text-red-600 dark:text-red-400">{localizedError}</p>
       )}
     </div>
   )

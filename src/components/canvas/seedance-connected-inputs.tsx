@@ -2,31 +2,104 @@
 
 import { FileAudio, FileVideo, Type, X } from 'lucide-react'
 import MediaPreviewImage from '@/components/media-preview-image'
+import { CompactImageUploadSlot } from '@/components/canvas/compact-image-upload-slot'
 import { openMediaPreview } from '@/store/media-preview-store'
 import { getSeedanceModeInputRules } from '@/lib/seedance-connection-rules'
-import type { SeedanceGenerationMode } from '@/lib/types'
-import { getImageRoleLabel, shouldShowImageRoleInPreview, type SeedanceUpstreamRefs } from '@/lib/seedance-upstream'
+import type { ImageRole, SeedanceGenerationMode } from '@/lib/types'
+import { getImageRoleLabel, shouldShowImageRoleInPreview, type SeedanceUpstreamRefs, type UpstreamImageRef } from '@/lib/seedance-upstream'
 
 type SeedanceConnectedInputsProps = {
+  seedanceNodeId: string
   refs: SeedanceUpstreamRefs
   mode: SeedanceGenerationMode
   disabled?: boolean
   onRemoveImage: (imageNodeId: string) => void
   onRemoveVideo: (videoNodeId: string) => void
   onRemoveAudio: (audioNodeId: string) => void
+  onUploadFrameImage?: (role: ImageRole, imageUrl: string) => void
+}
+
+function findFrameImage(
+  images: UpstreamImageRef[],
+  role: ImageRole,
+): UpstreamImageRef | undefined {
+  return images.find(image => image.role === role)
+}
+
+function FirstLastFrameInputs({
+  refs,
+  disabled,
+  onRemoveImage,
+  onUploadFrameImage,
+}: {
+  refs: SeedanceUpstreamRefs
+  disabled?: boolean
+  onRemoveImage: (imageNodeId: string) => void
+  onUploadFrameImage: (role: ImageRole, imageUrl: string) => void
+}) {
+  const firstFrame = findFrameImage(refs.images, 'first_frame')
+  const lastFrame = findFrameImage(refs.images, 'last_frame')
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium text-muted">首尾帧参考图</p>
+        <span className="text-[10px] text-muted">{refs.images.length}/2</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <CompactImageUploadSlot
+          label="首帧"
+          value={firstFrame?.imageUrl}
+          disabled={disabled}
+          onChange={imageUrl => onUploadFrameImage('first_frame', imageUrl)}
+          onClear={firstFrame
+            ? () => onRemoveImage(firstFrame.nodeId)
+            : undefined}
+        />
+        <CompactImageUploadSlot
+          label="尾帧"
+          value={lastFrame?.imageUrl}
+          disabled={disabled}
+          onChange={imageUrl => onUploadFrameImage('last_frame', imageUrl)}
+          onClear={lastFrame
+            ? () => onRemoveImage(lastFrame.nodeId)
+            : undefined}
+        />
+      </div>
+      <p className="text-[10px] leading-relaxed text-muted">
+        可从资产库拖入首帧/尾帧，或在画布连接参考图片节点；上传后会自动创建并连线
+      </p>
+    </div>
+  )
 }
 
 export default function SeedanceConnectedInputs({
+  seedanceNodeId: _seedanceNodeId,
   refs,
   mode,
   disabled = false,
   onRemoveImage,
   onRemoveVideo,
   onRemoveAudio,
+  onUploadFrameImage,
 }: SeedanceConnectedInputsProps) {
   const rules = getSeedanceModeInputRules(mode)
   const hasAnyMedia = refs.images.length > 0 || refs.videos.length > 0 || refs.audios.length > 0
   const showRole = shouldShowImageRoleInPreview(mode)
+
+  if (mode === 'first_last_frame' && onUploadFrameImage) {
+    return (
+      <div className="space-y-3">
+        <FirstLastFrameInputs
+          refs={refs}
+          disabled={disabled}
+          onRemoveImage={onRemoveImage}
+          onUploadFrameImage={onUploadFrameImage}
+        />
+        <SeedanceConnectedTextHint refs={refs} />
+      </div>
+    )
+  }
 
   if (!hasAnyMedia) {
     return (

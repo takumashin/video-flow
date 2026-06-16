@@ -8,6 +8,9 @@ export type SeedanceTaskPollResult = {
   progress: number
   videoUrl?: string
   error?: string
+  errorCode?: string
+  queuePosition?: number
+  progressStartedAt?: number
 }
 
 const TERMINAL_STATUSES: SeedanceTaskStatus[] = ['succeeded', 'failed', 'cancelled']
@@ -37,12 +40,22 @@ export async function pollSeedanceTaskClient(
     }
 
     const status = data.status as SeedanceTaskStatus
+    const progressStartedAt = typeof data.progressStartedAt === 'number'
+      ? data.progressStartedAt
+      : startedAtMs
     const result: SeedanceTaskPollResult = {
       taskId: data.taskId ?? taskId,
       status,
-      progress: computeFakeSeedanceProgress(startedAtMs, status),
+      progress: status === 'waiting' || status === 'submitting'
+        ? 0
+        : (typeof data.progress === 'number'
+            ? data.progress
+            : computeFakeSeedanceProgress(progressStartedAt, status)),
       videoUrl: data.videoUrl,
       error: data.error,
+      errorCode: typeof data.errorCode === 'string' ? data.errorCode : undefined,
+      queuePosition: typeof data.queuePosition === 'number' ? data.queuePosition : undefined,
+      progressStartedAt,
     }
 
     options?.onProgress?.(result)

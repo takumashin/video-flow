@@ -2,123 +2,39 @@
 
 import { Position, type NodeProps } from 'reactflow'
 import {
-  Film,
-  History,
   ImageIcon,
   Music,
   Play,
-  Sparkles,
   Trash2,
   Type,
   Video,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { useFakeSeedanceProgress } from '@/lib/use-fake-seedance-progress'
 import type { WorkflowEdge, WorkflowNode, WorkflowNodeData } from '@/lib/types'
 import { NodeType } from '@/lib/types'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
 import { SeedanceBrandText } from '@/components/seedance-brand-text'
+import { SiteLogo } from '@/components/site-logo'
 import { useWorkflowStore } from '@/store/workflow-store'
 import { getConnectedSeedanceModeForImageNode } from '@/lib/seedance-upstream'
-import VideoDownloadLink from '@/components/video-download-link'
-import VideoGenLoadingState from '@/components/video-gen-loading-state'
 import ImageUploadZone from './image-upload-zone'
 import MediaUploadZone from './media-upload-zone'
-import NodeVideoPlayer from './node-video-player'
 import WorkflowNodeHandle from './workflow-node-handle'
 import { SeedanceNodeSummary } from './seedance-node-panel'
 import {
   FieldLabel,
   IMAGE_ROLE_OPTIONS,
-  NodeSelect,
+  NodeOptionGroup,
   NodeTextArea,
-  StatusBadge,
 } from './node-fields'
 
-const nodeMeta: Record<NodeType, { icon: typeof Play; color: string; bg: string }> = {
+const nodeMeta: Record<Exclude<NodeType, NodeType.Output>, { icon: typeof Play; color: string; bg: string }> = {
   [NodeType.Start]: { icon: Play, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800' },
   [NodeType.TextPrompt]: { icon: Type, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 border-blue-200 dark:bg-blue-950/40 dark:border-blue-800' },
   [NodeType.ImageInput]: { icon: ImageIcon, color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-50 border-violet-200 dark:bg-violet-950/40 dark:border-violet-800' },
   [NodeType.VideoInput]: { icon: Video, color: 'text-sky-600 dark:text-sky-400', bg: 'bg-sky-50 border-sky-200 dark:bg-sky-950/40 dark:border-sky-800' },
   [NodeType.AudioInput]: { icon: Music, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800' },
-  [NodeType.Seedance]: { icon: Sparkles, color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-50 border-orange-200 dark:bg-orange-950/40 dark:border-orange-800' },
-  [NodeType.Output]: { icon: Film, color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-50 border-rose-200 dark:bg-rose-950/40 dark:border-rose-800' },
-}
-
-function OutputNodeBody({
-  id,
-  data,
-  nodes,
-  edges,
-}: {
-  id: string
-  data: Extract<WorkflowNodeData, { type: NodeType.Output }>
-  nodes: WorkflowNode[]
-  edges: WorkflowEdge[]
-}) {
-  const latestVideo = data.videoUrl ?? data.videoHistory?.[0]?.videoUrl
-  const historyCount = data.videoHistory?.length ?? 0
-  const upstreamSeedance = nodes.find(
-    n => n.data.type === NodeType.Seedance
-      && n.data.status === 'running'
-      && edges.some(e => e.source === n.id && e.target === id),
-  )
-  const isOutputGenerating = data.status === 'running' || upstreamSeedance != null
-  const upstreamProgress = useFakeSeedanceProgress(
-    upstreamSeedance?.data.type === NodeType.Seedance
-      ? upstreamSeedance.data.progressStartedAt
-      : undefined,
-    upstreamSeedance ? 'running' : undefined,
-    upstreamSeedance?.data.type === NodeType.Seedance ? upstreamSeedance.data.progress : undefined,
-  )
-
-  return (
-    <div className="space-y-2">
-      {!isOutputGenerating && <StatusBadge status={data.status} />}
-      {isOutputGenerating && !latestVideo
-        ? (
-            <VideoGenLoadingState
-              progress={upstreamProgress}
-              label="正在生成视频…"
-              maxWidth="100%"
-              aspectRatio="video"
-              className="nodrag"
-            />
-          )
-        : latestVideo
-        ? (
-            <div className="space-y-2">
-              <NodeVideoPlayer src={latestVideo} />
-              <div className="flex items-center justify-between gap-2 px-0.5">
-                <button
-                  type="button"
-                  className="nodrag inline-flex items-center gap-1 text-[11px] font-medium text-primary-light hover:underline"
-                  onClick={() => useWorkflowStore.getState().openVideoHistoryModal(id)}
-                >
-                  <History className="h-3 w-3" />
-                  查看历史 ({historyCount})
-                </button>
-                <VideoDownloadLink
-                  videoUrl={latestVideo}
-                  className="text-[11px] font-medium text-muted hover:text-primary-light hover:underline"
-                  showIcon={false}
-                />
-              </div>
-            </div>
-          )
-        : (
-            <button
-              type="button"
-              className="nodrag flex w-full flex-col items-center gap-1.5 rounded-md border border-dashed border-border bg-surface-muted py-4 text-center transition hover:border-border hover:bg-surface-muted/80"
-              onClick={() => useWorkflowStore.getState().openVideoHistoryModal(id)}
-            >
-              <Film className="h-5 w-5 text-muted" />
-              <p className="text-xs text-muted">等待生成结果...</p>
-              <p className="text-[11px] text-muted/80">点击可查看历史记录</p>
-            </button>
-          )}
-    </div>
-  )
+  [NodeType.Seedance]: { icon: Play, color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-50 border-orange-200 dark:bg-orange-950/40 dark:border-orange-800' },
 }
 
 function NodeBody({
@@ -158,7 +74,7 @@ function NodeBody({
         </div>
       )
 
-    case NodeType.ImageInput:
+    case NodeType.ImageInput: {
       const connectedSeedanceMode = getConnectedSeedanceModeForImageNode(id, nodes, edges)
       const showImageRoleField = connectedSeedanceMode === 'first_last_frame'
       const firstLastRoleOptions = IMAGE_ROLE_OPTIONS.filter(
@@ -178,7 +94,7 @@ function NodeBody({
           {showImageRoleField && (
             <div>
               <FieldLabel>图片角色</FieldLabel>
-              <NodeSelect
+              <NodeOptionGroup
                 value={data.role}
                 onChange={role => updateNodeData(id, { role })}
                 options={firstLastRoleOptions}
@@ -188,6 +104,7 @@ function NodeBody({
           )}
         </div>
       )
+    }
 
     case NodeType.VideoInput:
       return (
@@ -222,10 +139,8 @@ function NodeBody({
       )
 
     case NodeType.Seedance:
-      return null
-
     case NodeType.Output:
-      return <OutputNodeBody id={id} data={data} nodes={nodes} edges={edges} />
+      return null
   }
 }
 
@@ -233,10 +148,10 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
   const deleteNode = useWorkflowStore(s => s.deleteNode)
   const nodes = useActiveWorkflowSession()?.nodes ?? []
   const edges = useActiveWorkflowSession()?.edges ?? []
-  const meta = nodeMeta[data.type]
-  const Icon = meta.icon
+  const meta = nodeMeta[data.type as Exclude<NodeType, NodeType.Output>]
+  const Icon = meta?.icon ?? Play
   const showTarget = data.type !== NodeType.Start
-  const showSource = data.type !== NodeType.Output
+  const showSource = data.type !== NodeType.Seedance && data.type !== NodeType.Output
   const canDelete = data.type !== NodeType.Start
   const nodeDisabled = data.type === NodeType.Seedance && data.status === 'running'
 
@@ -249,10 +164,12 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
     <div
       className={cn(
         'node-drag-header flex cursor-grab items-center gap-2 rounded-t-xl border-b px-3 py-2 active:cursor-grabbing',
-        meta.bg,
+        meta?.bg,
       )}
     >
-      <Icon className={cn('h-4 w-4 shrink-0', meta.color)} />
+      {data.type === NodeType.Seedance
+        ? <SiteLogo size={16} className="h-4 w-4 shrink-0 rounded-sm" />
+        : <Icon className={cn('h-4 w-4 shrink-0', meta?.color)} />}
       <span className="min-w-0 flex-1 select-none truncate text-sm font-medium text-foreground">
         <SeedanceBrandText text={data.title} />
       </span>
@@ -272,7 +189,7 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
 
   if (data.type === NodeType.Seedance) {
     return (
-      <div className={cn('w-[300px]', cardClass)}>
+      <div className={cn('w-[360px]', cardClass)}>
         {showTarget && (
           <WorkflowNodeHandle type="target" position={Position.Left} />
         )}
@@ -289,19 +206,12 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
             selected={selected}
           />
         </div>
-
-        {showSource && (
-          <WorkflowNodeHandle type="source" position={Position.Right} />
-        )}
       </div>
     )
   }
 
   return (
-    <div className={cn(
-      data.type === NodeType.Output ? 'w-[360px]' : 'w-[300px]',
-      cardClass,
-    )}>
+    <div className={cn('w-[300px]', cardClass)}>
       {showTarget && (
         <WorkflowNodeHandle type="target" position={Position.Left} />
       )}

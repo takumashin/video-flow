@@ -1,6 +1,7 @@
 'use client'
 
-import { Loader2, Play } from 'lucide-react'
+import { useState } from 'react'
+import { History, Loader2, Play, Square } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { SeedanceNodeData, WorkflowEdge, WorkflowNode } from '@/lib/types'
 import {
@@ -8,12 +9,15 @@ import {
   getRecommendedModelForModeChange,
   shouldDisableAudio,
 } from '@/lib/seedance-models'
-import { getSeedanceUpstreamRefs } from '@/lib/seedance-upstream'
+import { getSeedanceUpstreamRefs, hasSeedancePromptContent } from '@/lib/seedance-upstream'
 import { isSeedanceJobInflight } from '@/lib/seedance-generation-control'
 import { SEEDANCE_MODE_OPTIONS } from '@/lib/seedance-modes'
+import { getSeedanceTaskPhaseLabel, isSystemQueuedSeedanceTaskStatus } from '@/lib/seedance-progress'
 import { useFakeSeedanceProgress } from '@/lib/use-fake-seedance-progress'
 import { useWorkflowStore } from '@/store/workflow-store'
 import VideoGenLoadingState from '@/components/video-gen-loading-state'
+import VideoDownloadLink from '@/components/video-download-link'
+import NodeVideoPlayer from '@/components/canvas/node-video-player'
 import PromptWithMentions from './prompt-with-mentions'
 import SeedanceConnectedInputs, { SeedanceConnectedTextHint } from './seedance-connected-inputs'
 import { SeedanceModelSelect } from './seedance-model-select'
@@ -34,41 +38,241 @@ type SeedancePanelProps = {
   edges: WorkflowEdge[]
 }
 
-function SeedanceGenerateButton({ id, data }: { id: string; data: SeedanceNodeData }) {
+function useSeedanceNodeProgress(data: SeedanceNodeData, isGenerating: boolean) {
+  const progressStatus = isGenerating
+    ? (data.taskStatus ?? 'running')
+    : data.status
+
+  return useFakeSeedanceProgress(
+    data.progressStartedAt,
+    progressStatus,
+    data.progress,
+  )
+}
+
+function getSeedanceNodeGeneratingLabel(
+  data: SeedanceNodeData,
+  displayProgress?: number,
+  options?: { hasPreviousVideo?: boolean },
+) {
+  if (isSystemQueuedSeedanceTaskStatus(data.taskStatus)) {
+    return getSeedanceTaskPhaseLabel({
+      taskStatus: data.taskStatus,
+      queuePosition: data.queuePosition,
+    })
+  }
+
+  if (data.taskStatus === 'queued') {
+    return getSeedanceTaskPhaseLabel({
+      taskStatus: data.taskStatus,
+      progress: displayProgress,
+    })
+  }
+
+  if (options?.hasPreviousVideo)
+    return displayProgress != null ? `正在生成新视频… ${displayProgress}%` : '正在生成新视频…'
+
+  return getSeedanceTaskPhaseLabel({
+    taskStatus: data.taskStatus ?? 'running',
+    progress: displayProgress,
+    generatingVideo: true,
+  })
+}
+
+function SeedanceGenerateButton({
+  id,
+  data,
+  nodes,
+}: {
+  id: string
+  data: SeedanceNodeData
+  nodes: WorkflowNode[]
+}) {
   const activeSessionId = useWorkflowStore(s => s.activeSessionId)
+  const cancelSeedanceNode = useWorkflowStore(s => s.cancelSeedanceNode)
   const isGenerating = data.status === 'running'
   const isJobActive = isSeedanceJobInflight(activeSessionId, id)
   const isStuckGenerating = isGenerating && !isJobActive
-  const displayProgress = useFakeSeedanceProgress(
-    data.progressStartedAt,
-    isGenerating ? 'running' : data.status,
-    data.progress,
-  )
+  const canCancel = isGenerating && !isStuckGenerating && (isJobActive || !!data.taskId)
+  const seedanceNode = nodes.find(node => node.id === id)
+  const hasPrompt = seedanceNode
+    ? hasSeedancePromptContent(seedanceNode)
+    : (data.prompt ?? '').trim().length > 0
+  const canSubmit = hasPrompt || isStuckGenerating
+  const displayProgress = useSeedanceNodeProgress(data, isGenerating)
+  const generatingLabel = getSeedanceNodeGeneratingLabel(data, displayProgress)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
+
+  const handleCancel = async () => {
+    setCancelling(true)
+    setCancelError(null)
+    try {
+      await cancelSeedanceNode(id)
+    }
+    catch (error) {
+      setCancelError(error instanceof Error ? error.message : '取消失败')
+    }
+    finally {
+      setCancelling(false)
+    }
+  }
 
   return (
-    <button
-      type="button"
-      disabled={isGenerating && isJobActive}
-      onClick={() => {
-        const store = useWorkflowStore.getState()
-        if (isStuckGenerating)
-          void store.resumeSeedanceNode(id)
-        else
-          void store.runSeedanceNode(id)
-      }}
-      className="nodrag inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[#104BD4] disabled:opacity-60"
-    >
-      {isStuckGenerating
-        ? <Play className="h-4 w-4" />
-        : isGenerating
-          ? <Loader2 className="h-4 w-4 animate-spin" />
-          : <Play className="h-4 w-4" />}
-      {isStuckGenerating
-        ? '恢复进度'
-        : isGenerating
-          ? (displayProgress != null ? `生成中 ${displayProgress}%` : '生成中...')
-          : '生成视频'}
-    </button>
+    <div className="space-y-2">
+      {canCancel && (
+        <button
+          type="button"
+          disabled={cancelling}
+          onClick={() => void handleCancel()}
+          className="nodrag inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-500/15 disabled:opacity-60 dark:text-red-400"
+        >
+          {cancelling
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <Square className="h-4 w-4 fill-current" />}
+          {cancelling ? '正在取消…' : '取消生成'}
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={(isGenerating && isJobActive) || cancelling || !canSubmit}
+        onClick={() => {
+          const store = useWorkflowStore.getState()
+          if (isStuckGenerating)
+            void store.resumeSeedanceNode(id)
+          else
+            void store.runSeedanceNode(id)
+        }}
+        className="nodrag inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[#104BD4] disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isStuckGenerating
+          ? <Play className="h-4 w-4" />
+          : isGenerating
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <Play className="h-4 w-4" />}
+        {isStuckGenerating
+          ? '恢复进度'
+          : isGenerating
+            ? generatingLabel
+            : '生成视频'}
+      </button>
+      {cancelError && (
+        <p className="text-[11px] text-red-600 dark:text-red-400">{cancelError}</p>
+      )}
+      {!hasPrompt && !isGenerating && (
+        <p className="text-[11px] text-amber-600 dark:text-amber-400">
+          请先在右侧栏或节点内填写提示词后再生成视频
+        </p>
+      )}
+    </div>
+  )
+}
+
+function SeedanceLatestVideo({
+  id,
+  videoUrl,
+  historyCount,
+  taskId,
+  previousLabel,
+  embedded = false,
+}: {
+  id: string
+  videoUrl: string
+  historyCount: number
+  taskId?: string
+  previousLabel?: string
+  embedded?: boolean
+}) {
+  return (
+    <div className="space-y-2">
+      {previousLabel && (
+        <p className="text-[10px] font-medium text-muted">{previousLabel}</p>
+      )}
+      {!embedded && <NodeVideoPlayer src={videoUrl} />}
+      <div className="flex items-center justify-between gap-2 px-0.5">
+        <button
+          type="button"
+          className="nodrag inline-flex items-center gap-1 text-[11px] font-medium text-primary-light hover:underline"
+          onClick={() => useWorkflowStore.getState().openVideoHistoryModal(id)}
+        >
+          <History className="h-3 w-3" />
+          生成历史 ({historyCount})
+        </button>
+        <VideoDownloadLink
+          videoUrl={videoUrl}
+          taskId={taskId}
+          className="text-[11px] font-medium text-muted hover:text-primary-light hover:underline"
+          showIcon={false}
+        />
+      </div>
+    </div>
+  )
+}
+
+function SeedanceNodeMediaSlot({
+  id,
+  data,
+  isGenerating,
+  isSystemQueue,
+  displayProgress,
+  generatingLabel,
+  latestVideo,
+  historyCount,
+}: {
+  id: string
+  data: SeedanceNodeData
+  isGenerating: boolean
+  isSystemQueue: boolean
+  displayProgress?: number
+  generatingLabel: string
+  latestVideo?: string
+  historyCount: number
+}) {
+  const awaitingVideo = !latestVideo && data.status === 'succeeded' && Boolean(data.taskId)
+  const showLoading = isGenerating || awaitingVideo
+  const showSlot = showLoading || Boolean(latestVideo)
+
+  if (!showSlot)
+    return null
+
+  return (
+    <div className="space-y-2">
+      <div className="relative aspect-video w-full overflow-hidden rounded-md bg-surface-muted">
+        {latestVideo && (
+          <div
+            className={cn(
+              'absolute inset-0',
+              showLoading && 'pointer-events-none opacity-35',
+            )}
+          >
+            <NodeVideoPlayer
+              src={latestVideo}
+              className="h-full min-h-0 rounded-none !aspect-auto"
+            />
+          </div>
+        )}
+        {showLoading && (
+          <div className={cn('h-full w-full', latestVideo && 'absolute inset-0 z-[1]')}>
+            <VideoGenLoadingState
+              progress={isSystemQueue ? undefined : displayProgress}
+              label={generatingLabel}
+              maxWidth="100%"
+              fill
+              className="nodrag h-full"
+            />
+          </div>
+        )}
+      </div>
+      {latestVideo && (
+        <SeedanceLatestVideo
+          id={id}
+          videoUrl={latestVideo}
+          historyCount={historyCount}
+          taskId={isGenerating ? data.videoHistory?.[0]?.taskId ?? data.taskId : data.taskId}
+          embedded
+        />
+      )}
+    </div>
   )
 }
 
@@ -83,14 +287,16 @@ export function SeedanceNodeSummary({
   const modeLabel = SEEDANCE_MODE_OPTIONS.find(o => o.value === mode)?.label ?? mode
   const modelLabel = getModelOption(data.model)?.label ?? data.model
   const prompt = (data.prompt ?? (data as { composedPrompt?: string }).composedPrompt ?? '').trim()
-  const isGenerating = data.status === 'running'
-  const displayProgress = useFakeSeedanceProgress(
-    data.progressStartedAt,
-    isGenerating ? 'running' : data.status,
-    data.progress,
-  )
   const upstreamRefs = getSeedanceUpstreamRefs(id, nodes, edges)
   const refCount = upstreamRefs.images.length + upstreamRefs.videos.length + upstreamRefs.audios.length
+  const latestVideo = data.videoUrl ?? data.videoHistory?.[0]?.videoUrl
+  const historyCount = data.videoHistory?.length ?? 0
+  const isGenerating = data.status === 'running'
+  const isSystemQueue = isSystemQueuedSeedanceTaskStatus(data.taskStatus)
+  const displayProgress = useSeedanceNodeProgress(data, isGenerating)
+  const generatingLabel = getSeedanceNodeGeneratingLabel(data, displayProgress, {
+    hasPreviousVideo: Boolean(latestVideo || historyCount > 0),
+  })
 
   return (
     <div className="space-y-2">
@@ -116,26 +322,38 @@ export function SeedanceNodeSummary({
             <p className="text-xs text-muted">尚未填写提示词</p>
           )}
 
-      {isGenerating && (
-        <VideoGenLoadingState
-          progress={displayProgress}
-          label="正在生成视频…"
-          maxWidth="100%"
-          aspectRatio="video"
-          className="nodrag"
-        />
+      <SeedanceNodeMediaSlot
+        id={id}
+        data={data}
+        isGenerating={isGenerating}
+        isSystemQueue={isSystemQueue}
+        displayProgress={displayProgress}
+        generatingLabel={generatingLabel}
+        latestVideo={latestVideo}
+        historyCount={historyCount}
+      />
+
+      {!latestVideo && historyCount > 0 && (
+        <button
+          type="button"
+          className="nodrag flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border bg-surface-muted py-3 text-xs text-muted transition hover:border-border hover:bg-surface-muted/80"
+          onClick={() => useWorkflowStore.getState().openVideoHistoryModal(id)}
+        >
+          <History className="h-3.5 w-3.5" />
+          查看 {historyCount} 条生成历史
+        </button>
       )}
 
-      {!isGenerating && (data.status !== 'idle' || data.progress != null) && (
+      {!isGenerating && (data.status === 'failed' || data.error) && (
         <StatusBadge
-          status={data.status}
+          status="failed"
           error={data.error}
           taskId={data.taskId}
           progress={displayProgress}
         />
       )}
 
-      <SeedanceGenerateButton id={id} data={data} />
+      <SeedanceGenerateButton id={id} data={data} nodes={nodes} />
 
       {!selected && !isGenerating && (
         <p className="text-[10px] text-muted/80">点击节点后在右侧栏编辑参数</p>
@@ -156,6 +374,10 @@ export function SeedanceNodeDetailPanel({
   const updateNodeData = useWorkflowStore(s => s.updateNodeData)
   const pruneSeedanceEdgesForMode = useWorkflowStore(s => s.pruneSeedanceEdgesForMode)
   const upstreamRefs = getSeedanceUpstreamRefs(id, nodes, edges)
+  const seedanceNode = nodes.find(node => node.id === id)
+  const hasPrompt = seedanceNode
+    ? hasSeedancePromptContent(seedanceNode)
+    : (data.prompt ?? '').trim().length > 0
 
   return (
     <div
@@ -181,7 +403,13 @@ export function SeedanceNodeDetailPanel({
           mode={data.generationMode ?? 'text_to_video'}
           disabled={disabled}
         />
+        {!hasPrompt && (
+          <p className="text-[11px] text-amber-600 dark:text-amber-400">
+            请填写视频描述（提示词），未填写时无法提交生成
+          </p>
+        )}
         <SeedanceConnectedInputs
+          seedanceNodeId={id}
           refs={upstreamRefs}
           mode={data.generationMode ?? 'text_to_video'}
           disabled={disabled}
@@ -191,6 +419,8 @@ export function SeedanceNodeDetailPanel({
             useWorkflowStore.getState().disconnectUpstreamVideo(id, videoNodeId)}
           onRemoveAudio={audioNodeId =>
             useWorkflowStore.getState().disconnectUpstreamAudio(id, audioNodeId)}
+          onUploadFrameImage={(role, imageUrl) =>
+            useWorkflowStore.getState().setSeedanceFrameImage(id, role, imageUrl)}
         />
         <SeedanceConnectedTextHint refs={upstreamRefs} />
         <SeedanceModeSwitcher

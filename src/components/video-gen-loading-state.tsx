@@ -44,6 +44,8 @@ type VideoGenLoadingStateProps = {
   /** square = 1:1，video = 16:9 */
   aspectRatio?: 'square' | 'video'
   maxWidth?: number | string
+  /** 填满父级固定高度容器（用于节点内 overlay，避免切换时高度跳动） */
+  fill?: boolean
 }
 
 export default function VideoGenLoadingState({
@@ -52,6 +54,7 @@ export default function VideoGenLoadingState({
   className,
   aspectRatio = 'video',
   maxWidth = 480,
+  fill = false,
 }: VideoGenLoadingStateProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
@@ -151,8 +154,8 @@ export default function VideoGenLoadingState({
 
   return (
     <div
-      className={cn('relative w-full', className)}
-      style={{ maxWidth }}
+      className={cn('relative w-full', fill && 'h-full', className)}
+      style={fill ? undefined : { maxWidth }}
       data-testid="video-gen-loading-state-frame"
     >
       <div
@@ -160,8 +163,13 @@ export default function VideoGenLoadingState({
         aria-label={label}
         data-testid="video-gen-loading-state"
         className={cn(
-          'relative isolate w-full overflow-hidden rounded-[36px] bg-surface-muted/80 text-foreground dark:bg-surface-muted/60',
-          aspectRatio === 'square' ? 'aspect-square' : 'aspect-video',
+          'relative isolate w-full overflow-hidden bg-surface-muted/80 text-foreground dark:bg-surface-muted/60',
+          fill
+            ? 'h-full rounded-none'
+            : cn(
+                'rounded-[36px]',
+                aspectRatio === 'square' ? 'aspect-square' : 'aspect-video',
+              ),
         )}
       >
         <canvas
