@@ -37,6 +37,31 @@ export async function createSeedanceTask(payload: SeedanceCreateTaskRequest): Pr
   return { id: data.id }
 }
 
+/** 取消 queued 任务或删除终态任务记录（火山 DELETE /api/v3/contents/generations/tasks/{id}） */
+export async function cancelSeedanceTask(taskId: string): Promise<void> {
+  const { apiKey, baseUrl } = getSeedanceConfig()
+
+  const response = await fetch(`${baseUrl}/api/v3/contents/generations/tasks/${taskId}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    let message = `取消任务失败 (${response.status})`
+    try {
+      const data = await response.json()
+      message = data?.error?.message || data?.message || message
+    }
+    catch {
+      // ignore parse errors
+    }
+    throw new Error(message)
+  }
+}
+
 export async function getSeedanceTask(taskId: string): Promise<SeedanceTaskResponse> {
   const { apiKey, baseUrl } = getSeedanceConfig()
 

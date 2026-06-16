@@ -1,10 +1,32 @@
 import { NextResponse } from 'next/server'
-import { buildSeedanceTaskPayload, createSeedanceTask, getSeedanceConfig, listSeedanceTasks, pollSeedanceTask } from '@/lib/seedance'
+import { randomUUID } from 'node:crypto'
+import { buildSeedanceTaskPayload, getSeedanceConfig, pollSeedanceTask } from '@/lib/seedance'
 import { prepareAudiosForMode, prepareImagesForMode, prepareVideosForMode } from '@/lib/seedance-modes'
 import { buildSeedanceApiVideoParamsFromRequest } from '@/lib/seedance-params'
-import { resolveSeedanceModel } from '@/lib/seedance-models'
+import { resolveSeedanceModel, getSeedanceModelCreditCost } from '@/lib/seedance-models'
+import {
+  InsufficientCreditsError,
+  refundCreditsForReviewFailedTask,
+  spendCreditsForVideoGeneration,
+} from '@/lib/credits/service'
+import {
+  createWaitingSeedanceTaskRecord,
+  getSeedanceTaskRecordForUser,
+  listActiveSeedanceTaskRecords,
+  listSeedanceTaskRecords,
+  seedanceTaskRecordToListItem,
+  syncSeedanceTaskRecordFromApi,
+  upsertSeedanceTaskRecord,
+} from '@/lib/seedance-task/service'
+import {
+  getSeedanceApiTaskId,
+  getWaitingQueuePosition,
+  scheduleSeedanceQueueProcessing,
+} from '@/lib/seedance-queue/service'
+import type { SeedanceTaskSubmitPayload } from '@/lib/seedance-queue/types'
 import { resolveImageUrlForApi, resolveMediaUrlForApi } from '@/lib/uploads'
 import { saveVideoFromUrl } from '@/lib/video-storage'
+import { authErrorResponse, requireAuth } from '@/lib/auth/context'
 import type {
   AudioContentItem,
   ImageContentItem,
@@ -15,6 +37,8 @@ import type {
 } from '@/lib/types'
 
 const VALID_STATUSES: SeedanceTaskStatus[] = [
+  'waiting',
+  'submitting',
   'queued',
   'running',
   'succeeded',
@@ -22,8 +46,30 @@ const VALID_STATUSES: SeedanceTaskStatus[] = [
   'cancelled',
 ]
 
+async function waitForTaskSubmission(userId: string, taskId: string, timeoutMs = 120_000) {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const record = await getSeedanceTaskRecordForUser(userId, taskId)
+    if (!record)
+      throw new Error('任务不存在')
+
+    if (record.status === 'failed')
+      throw new Error(record.errorMessage || '任务提交失败')
+
+    if (record.status !== 'waiting' && record.status !== 'submitting')
+      return record
+
+    await new Promise(resolve => setTimeout(resolve, 500))
+    scheduleSeedanceQueueProcessing()
+  }
+
+  throw new Error('排队超时，请稍后在任务队列中查看')
+}
+
 export async function POST(request: Request) {
   try {
+    const { workspaceId, userId } = await requireAuth()
     const body = await request.json()
     const {
       prompt,
@@ -32,6 +78,9 @@ export async function POST(request: Request) {
       audios,
       generationMode = 'text_to_video',
       model,
+      nodeTitle,
+      workflowId,
+      nodeId,
       waitForResult = true,
     } = body
 
@@ -106,27 +155,103 @@ export async function POST(request: Request) {
 
     const videoParams = buildSeedanceApiVideoParamsFromRequest(body)
     const payload = buildSeedanceTaskPayload(resolvedModel, prompt, content, videoParams)
+    const creditCost = getSeedanceModelCreditCost(resolvedModel)
+    const clientTaskId = randomUUID()
 
-    const { id } = await createSeedanceTask(payload)
-
-    if (!waitForResult) {
-      return NextResponse.json({ taskId: id, status: 'queued' })
+    try {
+      await spendCreditsForVideoGeneration({
+        userId,
+        model: resolvedModel,
+        taskId: clientTaskId,
+      })
+    }
+    catch (error) {
+      if (error instanceof InsufficientCreditsError) {
+        return NextResponse.json({
+          error: error.message,
+          code: 'INSUFFICIENT_CREDITS',
+          balance: error.balance,
+          required: error.required,
+        }, { status: 402 })
+      }
+      throw error
     }
 
-    const result = await pollSeedanceTask(id)
+    const submitPayload: SeedanceTaskSubmitPayload = {
+      request: payload,
+      creditCost,
+    }
+
+    const record = await createWaitingSeedanceTaskRecord({
+      userId,
+      workspaceId,
+      taskId: clientTaskId,
+      prompt: prompt.trim(),
+      nodeTitle: typeof nodeTitle === 'string' ? nodeTitle.trim() || null : null,
+      workflowId: typeof workflowId === 'string' ? workflowId.trim() || null : null,
+      nodeId: typeof nodeId === 'string' ? nodeId.trim() || null : null,
+      model: resolvedModel,
+      submitPayload,
+    })
+
+    scheduleSeedanceQueueProcessing()
+
+    const queuePosition = await getWaitingQueuePosition(record.id)
+
+    if (!waitForResult) {
+      return NextResponse.json({
+        taskId: clientTaskId,
+        status: 'waiting',
+        queuePosition,
+        creditCost,
+      })
+    }
+
+    const submitted = await waitForTaskSubmission(userId, clientTaskId)
+    const apiTaskId = getSeedanceApiTaskId(submitted)
+    if (!apiTaskId)
+      throw new Error('任务提交异常，未获得 Seedance 任务 ID')
+
+    const result = await pollSeedanceTask(apiTaskId)
 
     if (result.status !== 'succeeded') {
-      return NextResponse.json({
-        taskId: id,
+      const errorMessage = result.error?.message || '视频生成失败'
+      await upsertSeedanceTaskRecord({
+        userId,
+        workspaceId,
+        taskId: clientTaskId,
         status: result.status,
-        error: result.error?.message || '视频生成失败',
+        errorMessage,
+      })
+      await refundCreditsForReviewFailedTask({
+        userId,
+        taskId: clientTaskId,
+        model: resolvedModel,
+        creditCost,
+        errorMessage,
+      })
+      scheduleSeedanceQueueProcessing()
+
+      return NextResponse.json({
+        taskId: clientTaskId,
+        status: result.status,
+        error: errorMessage,
       }, { status: 500 })
     }
 
     const remoteVideoUrl = result.content?.video_url
     if (!remoteVideoUrl) {
+      await upsertSeedanceTaskRecord({
+        userId,
+        workspaceId,
+        taskId: clientTaskId,
+        status: result.status,
+        errorMessage: '生成成功但未返回视频地址',
+      })
+      scheduleSeedanceQueueProcessing()
+
       return NextResponse.json({
-        taskId: id,
+        taskId: clientTaskId,
         status: result.status,
         error: '生成成功但未返回视频地址',
       }, { status: 500 })
@@ -134,18 +259,30 @@ export async function POST(request: Request) {
 
     let videoUrl = remoteVideoUrl
     try {
-      const saved = await saveVideoFromUrl(remoteVideoUrl)
+      const saved = await saveVideoFromUrl(remoteVideoUrl, workspaceId, userId, apiTaskId)
       videoUrl = saved.url
     }
     catch (saveError) {
       console.error('保存视频到本地失败，将使用远程 URL:', saveError)
     }
 
+    await upsertSeedanceTaskRecord({
+      userId,
+      workspaceId,
+      taskId: clientTaskId,
+      status: 'succeeded',
+      progress: 100,
+      videoUrl,
+      remoteVideoUrl,
+    })
+    scheduleSeedanceQueueProcessing()
+
     return NextResponse.json({
-      taskId: id,
+      taskId: clientTaskId,
       status: result.status,
       videoUrl,
       remoteVideoUrl,
+      creditCost,
     })
   }
   catch (error) {
@@ -156,32 +293,87 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    const { userId, workspaceId } = await requireAuth()
     const { searchParams } = new URL(request.url)
     const pageNum = Math.max(1, Number(searchParams.get('page_num') ?? searchParams.get('pageNum') ?? 1))
     const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('page_size') ?? searchParams.get('pageSize') ?? 20)))
     const statusParam = searchParams.get('filter.status') ?? searchParams.get('status') ?? ''
+    const activeOnly = searchParams.get('active') === 'true'
+
+    if (activeOnly) {
+      const activeItems = await listActiveSeedanceTaskRecords({ userId, workspaceId })
+
+      const syncResults = await Promise.allSettled(
+        activeItems
+          .filter(item => item.status !== 'waiting' && item.status !== 'submitting')
+          .map(item => syncSeedanceTaskRecordFromApi(userId, item.taskId)),
+      )
+
+      scheduleSeedanceQueueProcessing()
+
+      const refreshed = await listActiveSeedanceTaskRecords({ userId, workspaceId })
+      const errorCodeByTaskId = new Map<string, string>()
+      for (const result of syncResults) {
+        if (result.status === 'fulfilled' && result.value?.errorCode)
+          errorCodeByTaskId.set(result.value.record.taskId, result.value.errorCode)
+      }
+
+      return NextResponse.json({
+        total: refreshed.length,
+        items: await Promise.all(refreshed.map(record => seedanceTaskRecordToListItem(
+          record,
+          { errorCode: errorCodeByTaskId.get(record.taskId) },
+        ))),
+      })
+    }
+
     const status = VALID_STATUSES.includes(statusParam as SeedanceTaskStatus)
       ? (statusParam as SeedanceTaskStatus)
       : undefined
 
-    const taskIds = searchParams.getAll('filter.task_ids')
-    if (taskIds.length === 0) {
-      const single = searchParams.get('task_ids')
-      if (single)
-        taskIds.push(...single.split(',').map(id => id.trim()).filter(Boolean))
-    }
-
-    const result = await listSeedanceTasks({
+    const result = await listSeedanceTaskRecords({
+      userId,
+      workspaceId,
       pageNum,
       pageSize,
-      status: status ?? '',
-      taskIds: taskIds.length > 0 ? taskIds : undefined,
+      status,
     })
 
-    return NextResponse.json(result)
+    const activeItems = result.items.filter(item =>
+      item.status === 'queued' || item.status === 'running',
+    )
+
+    const syncResults = await Promise.allSettled(
+      activeItems.map(item => syncSeedanceTaskRecordFromApi(userId, item.taskId)),
+    )
+
+    scheduleSeedanceQueueProcessing()
+
+    const refreshed = activeItems.length > 0
+      ? await listSeedanceTaskRecords({
+          userId,
+          workspaceId,
+          pageNum,
+          pageSize,
+          status,
+        })
+      : result
+
+    const errorCodeByTaskId = new Map<string, string>()
+    for (const syncResult of syncResults) {
+      if (syncResult.status === 'fulfilled' && syncResult.value?.errorCode)
+        errorCodeByTaskId.set(syncResult.value.record.taskId, syncResult.value.errorCode)
+    }
+
+    return NextResponse.json({
+      total: refreshed.total,
+      items: await Promise.all(refreshed.items.map(record => seedanceTaskRecordToListItem(
+        record,
+        { errorCode: errorCodeByTaskId.get(record.taskId) },
+      ))),
+    })
   }
   catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return authErrorResponse(error)
   }
 }

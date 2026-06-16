@@ -59,6 +59,8 @@ export type SeedanceVideoRatio =
   | '21:9'
   | 'adaptive'
 
+export type SeedanceTaskStatus = 'waiting' | 'submitting' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+
 export type SeedanceNodeData = {
   type: NodeType.Seedance
   title: string
@@ -75,12 +77,18 @@ export type SeedanceNodeData = {
   watermark: boolean
   cameraFixed: boolean
   status: 'idle' | 'running' | 'succeeded' | 'failed'
+  /** 火山任务状态（waiting/submitting/queued/running 等），用于节点内展示排队文案 */
+  taskStatus?: SeedanceTaskStatus
+  /** 系统排队序号（waiting 时有效） */
+  queuePosition?: number
   /** 0–100，展示用假进度（基于 progressStartedAt 计算） */
   progress?: number
   /** 本次生成开始时间，用于假进度条 */
   progressStartedAt?: number
   taskId?: string
   error?: string
+  videoUrl?: string
+  videoHistory?: VideoHistoryItem[]
 }
 
 export type VideoHistoryItem = {
@@ -115,13 +123,12 @@ export type SavedWorkflow = {
   name: string
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  revision: number
   createdAt: number
   updatedAt: number
 }
 
 export type WorkflowSummary = Pick<SavedWorkflow, 'id' | 'name' | 'createdAt' | 'updatedAt'>
-
-export type SeedanceTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
 export type ImageContentItem = {
   imageUrl: string
@@ -182,6 +189,7 @@ export type SeedanceTaskListItem = {
   }
   error?: {
     message?: string
+    code?: string
   }
   usage?: {
     completion_tokens?: number
@@ -189,8 +197,14 @@ export type SeedanceTaskListItem = {
   }
   created_at?: number
   updated_at?: number
-  /** 本机轮询或工作流运行时写入的进度 */
+  /** 工作流或轮询写入的展示进度 */
   progress?: number
+  prompt?: string
+  nodeTitle?: string
+  workflowId?: string
+  nodeId?: string
+  progressStartedAt?: number
+  queuePosition?: number
 }
 
 export type SeedanceTaskListResponse = {

@@ -1,6 +1,7 @@
 export const ASSET_DRAG_MIME = 'application/seedance-asset'
 
 export type AssetDragPayload = {
+  id?: string
   kind: 'image' | 'video' | 'audio'
   url: string
   filename?: string

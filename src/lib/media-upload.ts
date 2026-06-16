@@ -27,6 +27,7 @@ export {
 export async function uploadMediaFile(
   file: File,
   expectedKind?: 'image' | 'video' | 'audio',
+  folderId?: string | null,
 ): Promise<string> {
   const kind = getUploadKind(file)
   if (!kind)
@@ -51,6 +52,8 @@ export async function uploadMediaFile(
 
   const formData = new FormData()
   formData.append('file', file)
+  if (folderId)
+    formData.append('folderId', folderId)
 
   const response = await fetch('/api/uploads', {
     method: 'POST',
@@ -68,20 +71,21 @@ export async function uploadMediaFile(
 export async function processMediaFile(
   file: File,
   expectedKind?: 'image' | 'video' | 'audio',
+  folderId?: string | null,
 ): Promise<string> {
-  return uploadMediaFile(file, expectedKind)
+  return uploadMediaFile(file, expectedKind, folderId)
 }
 
-export async function processVideoFiles(files: File[]): Promise<string[]> {
+export async function processVideoFiles(files: File[], folderId?: string | null): Promise<string[]> {
   const results: string[] = []
   for (const file of files)
-    results.push(await uploadMediaFile(file, 'video'))
+    results.push(await uploadMediaFile(file, 'video', folderId))
   return results
 }
 
-export async function processAudioFiles(files: File[]): Promise<string[]> {
+export async function processAudioFiles(files: File[], folderId?: string | null): Promise<string[]> {
   const results: string[] = []
   for (const file of files)
-    results.push(await uploadMediaFile(file, 'audio'))
+    results.push(await uploadMediaFile(file, 'audio', folderId))
   return results
 }

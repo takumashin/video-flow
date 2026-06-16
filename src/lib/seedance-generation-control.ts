@@ -20,7 +20,7 @@ export function endSeedanceJob(sessionId: string, nodeId: string) {
   inflight.delete(key)
 }
 
-export function cancelSeedanceJob(sessionId: string, nodeId: string) {
+export function abortSeedanceJob(sessionId: string, nodeId: string) {
   const key = getSeedanceJobKey(sessionId, nodeId)
   controllers.get(key)?.abort()
   controllers.delete(key)

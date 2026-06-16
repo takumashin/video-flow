@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Clock, Film, Play, X } from 'lucide-react'
+import { Clock, Film, X } from 'lucide-react'
 import VideoDownloadLink from '@/components/video-download-link'
 import NodeVideoPlayer from '@/components/canvas/node-video-player'
+import { VideoFirstFrameThumb } from '@/components/canvas/video-first-frame-thumb'
 import { cn } from '@/lib/cn'
 import type { VideoHistoryItem } from '@/lib/types'
 import { NodeType } from '@/lib/types'
@@ -27,7 +28,11 @@ export default function VideoHistoryModal() {
   const nodes = activeSession?.nodes ?? []
   const closeVideoHistoryModal = useWorkflowStore(s => s.closeVideoHistoryModal)
   const node = nodes.find(n => n.id === nodeId)
-  const history = node?.data.type === NodeType.Output ? (node.data.videoHistory ?? []) : []
+  const history = node?.data.type === NodeType.Seedance
+    ? (node.data.videoHistory ?? [])
+    : node?.data.type === NodeType.Output
+      ? (node.data.videoHistory ?? [])
+      : []
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const selected = history.find(item => item.id === selectedId) ?? history[0]
@@ -50,7 +55,7 @@ export default function VideoHistoryModal() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [nodeId, closeVideoHistoryModal])
 
-  if (!nodeId || !node || node.data.type !== NodeType.Output)
+  if (!nodeId || !node || (node.data.type !== NodeType.Seedance && node.data.type !== NodeType.Output))
     return null
 
   return (
@@ -180,23 +185,16 @@ function HistoryListItem({
           : 'border-border hover:border-border hover:bg-surface-muted',
       )}
     >
-      <div className="relative aspect-square h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border bg-black">
-        <video
-          src={item.videoUrl}
-          muted
-          playsInline
-          preload="metadata"
-          className="h-full w-full object-contain"
-        />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white">
-            <Play className="h-3 w-3 fill-current" />
+      <VideoFirstFrameThumb
+        src={item.videoUrl}
+        className="aspect-square h-16 w-16 shrink-0 rounded-lg border border-border"
+        showPlayIcon
+        badge={(
+          <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[10px] text-white">
+            #{index + 1}
           </span>
-        </div>
-        <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[10px] text-white">
-          #{index + 1}
-        </span>
-      </div>
+        )}
+      />
       <div className="min-w-0 flex-1 py-0.5">
         <p className="text-xs font-medium text-foreground">
           {index === 0 ? '最新生成' : `历史 #${index + 1}`}

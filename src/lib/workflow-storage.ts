@@ -1,111 +1,146 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { v4 as uuidv4 } from 'uuid'
+import { desc, eq, sql } from 'drizzle-orm'
+import { db } from '@/db'
+import { workflows } from '@/db/schema'
+import { WorkflowRevisionConflictError, type WorkflowUpdateResult } from './workflow-revision'
 import type { SavedWorkflow, WorkflowEdge, WorkflowNode, WorkflowSummary } from './types'
 
-const WORKFLOW_DIR = path.join(process.cwd(), 'data', 'workflows')
-const WORKFLOW_ID_PATTERN = /^[a-f0-9-]{36}$/
-
-export async function ensureWorkflowDir() {
-  await fs.mkdir(WORKFLOW_DIR, { recursive: true })
-}
-
-function getWorkflowFilePath(id: string) {
-  if (!WORKFLOW_ID_PATTERN.test(id))
-    throw new Error('无效的工作流 ID')
-  return path.join(WORKFLOW_DIR, `${id}.json`)
-}
-
-async function readWorkflowFile(id: string): Promise<SavedWorkflow | null> {
-  try {
-    const raw = await fs.readFile(getWorkflowFilePath(id), 'utf-8')
-    return JSON.parse(raw) as SavedWorkflow
-  }
-  catch {
-    return null
+function toSavedWorkflow(row: typeof workflows.$inferSelect): SavedWorkflow {
+  return {
+    id: row.id,
+    name: row.name,
+    nodes: row.nodes,
+    edges: row.edges,
+    revision: row.revision,
+    createdAt: row.createdAt.getTime(),
+    updatedAt: row.updatedAt.getTime(),
   }
 }
 
-async function writeWorkflowFile(workflow: SavedWorkflow) {
-  await ensureWorkflowDir()
-  await fs.writeFile(getWorkflowFilePath(workflow.id), JSON.stringify(workflow, null, 2), 'utf-8')
-}
-
-export async function listWorkflows(): Promise<WorkflowSummary[]> {
-  await ensureWorkflowDir()
-  const files = await fs.readdir(WORKFLOW_DIR)
-  const workflows: WorkflowSummary[] = []
-
-  for (const file of files) {
-    if (!file.endsWith('.json'))
-      continue
-    const id = file.replace(/\.json$/, '')
-    const workflow = await readWorkflowFile(id)
-    if (!workflow)
-      continue
-    workflows.push({
-      id: workflow.id,
-      name: workflow.name,
-      createdAt: workflow.createdAt,
-      updatedAt: workflow.updatedAt,
+export async function listWorkflows(workspaceId: string): Promise<WorkflowSummary[]> {
+  const rows = await db
+    .select({
+      id: workflows.id,
+      name: workflows.name,
+      createdAt: workflows.createdAt,
+      updatedAt: workflows.updatedAt,
     })
-  }
+    .from(workflows)
+    .where(eq(workflows.workspaceId, workspaceId))
+    .orderBy(desc(workflows.updatedAt))
 
-  return workflows.sort((a, b) => b.updatedAt - a.updatedAt)
+  return rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    createdAt: row.createdAt.getTime(),
+    updatedAt: row.updatedAt.getTime(),
+  }))
 }
 
-export async function getWorkflow(id: string): Promise<SavedWorkflow | null> {
-  return readWorkflowFile(id)
+export async function getWorkflow(id: string, workspaceId: string): Promise<SavedWorkflow | null> {
+  const [row] = await db
+    .select()
+    .from(workflows)
+    .where(eq(workflows.id, id))
+    .limit(1)
+
+  if (!row || row.workspaceId !== workspaceId)
+    return null
+
+  return toSavedWorkflow(row)
 }
 
 export async function createWorkflow(
+  workspaceId: string,
+  userId: string,
   name: string,
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
 ): Promise<SavedWorkflow> {
-  const now = Date.now()
-  const workflow: SavedWorkflow = {
-    id: uuidv4(),
-    name: name.trim() || '未命名工作流',
-    nodes,
-    edges,
-    createdAt: now,
-    updatedAt: now,
-  }
-  await writeWorkflowFile(workflow)
-  return workflow
+  const [row] = await db
+    .insert(workflows)
+    .values({
+      workspaceId,
+      createdBy: userId,
+      name: name.trim() || '未命名工作流',
+      nodes,
+      edges,
+      revision: 1,
+    })
+    .returning()
+
+  return toSavedWorkflow(row)
 }
 
 export async function updateWorkflow(
   id: string,
+  workspaceId: string,
   payload: {
     name?: string
     nodes?: WorkflowNode[]
     edges?: WorkflowEdge[]
+    expectedRevision?: number
+    force?: boolean
   },
-): Promise<SavedWorkflow | null> {
-  const existing = await readWorkflowFile(id)
+): Promise<WorkflowUpdateResult | null> {
+  const existing = await getWorkflow(id, workspaceId)
   if (!existing)
     return null
 
-  const workflow: SavedWorkflow = {
-    ...existing,
-    name: payload.name?.trim() || existing.name,
-    nodes: payload.nodes ?? existing.nodes,
-    edges: payload.edges ?? existing.edges,
-    updatedAt: Date.now(),
+  if (
+    !payload.force
+    && payload.expectedRevision !== undefined
+    && existing.revision !== payload.expectedRevision
+  ) {
+    return { ok: false, conflict: true, workflow: existing }
   }
 
-  await writeWorkflowFile(workflow)
-  return workflow
+  const [row] = await db
+    .update(workflows)
+    .set({
+      name: payload.name?.trim() || existing.name,
+      nodes: payload.nodes ?? existing.nodes,
+      edges: payload.edges ?? existing.edges,
+      revision: sql`${workflows.revision} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(workflows.id, id))
+    .returning()
+
+  if (!row)
+    return { ok: false, conflict: true, workflow: existing }
+
+  return { ok: true, workflow: toSavedWorkflow(row) }
 }
 
-export async function deleteWorkflow(id: string): Promise<boolean> {
-  try {
-    await fs.unlink(getWorkflowFilePath(id))
-    return true
-  }
-  catch {
+export async function updateWorkflowOrThrow(
+  id: string,
+  workspaceId: string,
+  payload: {
+    name?: string
+    nodes?: WorkflowNode[]
+    edges?: WorkflowEdge[]
+    expectedRevision?: number
+    force?: boolean
+  },
+): Promise<SavedWorkflow> {
+  const result = await updateWorkflow(id, workspaceId, payload)
+  if (!result)
+    throw new Error('工作流不存在')
+  if (!result.ok)
+    throw new WorkflowRevisionConflictError(result.workflow)
+
+  return result.workflow
+}
+
+export async function deleteWorkflow(id: string, workspaceId: string): Promise<boolean> {
+  const existing = await getWorkflow(id, workspaceId)
+  if (!existing)
     return false
-  }
+
+  const result = await db
+    .delete(workflows)
+    .where(eq(workflows.id, id))
+    .returning({ id: workflows.id })
+
+  return result.length > 0
 }

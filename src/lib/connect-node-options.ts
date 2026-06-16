@@ -3,6 +3,7 @@ import {
   countUpstreamImageConnections,
   countUpstreamVideoConnections,
   getSeedanceModeInputRules,
+  resolveSeedanceModeForConnection,
 } from './seedance-connection-rules'
 import type { SeedanceGenerationMode, WorkflowEdge, WorkflowNode } from './types'
 import { NodeType } from './types'
@@ -14,6 +15,56 @@ export type ConnectMenuContext = {
   handleType: ConnectHandleSide
 }
 
+function canConnectUpstreamType(
+  seedanceNode: WorkflowNode,
+  upstreamType: NodeType,
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+): boolean {
+  const pseudoSource: WorkflowNode = {
+    id: `__preview_${upstreamType}`,
+    type: 'custom',
+    position: { x: 0, y: 0 },
+    data: upstreamType === NodeType.TextPrompt
+      ? { type: NodeType.TextPrompt, title: '文本提示词', prompt: '' }
+      : upstreamType === NodeType.ImageInput
+        ? { type: NodeType.ImageInput, title: '参考图片', imageUrl: '', role: 'first_frame' }
+        : upstreamType === NodeType.VideoInput
+          ? { type: NodeType.VideoInput, title: '参考视频', mediaUrl: '' }
+          : { type: NodeType.AudioInput, title: '参考音频', mediaUrl: '' },
+  }
+
+  if (seedanceNode.data.type !== NodeType.Seedance)
+    return false
+
+  const autoMode = resolveSeedanceModeForConnection(pseudoSource, seedanceNode, nodes, edges)
+  const mode = autoMode ?? (seedanceNode.data.generationMode ?? 'text_to_video')
+  const rules = getSeedanceModeInputRules(mode)
+
+  if (upstreamType === NodeType.TextPrompt)
+    return rules.allowTextUpstream
+
+  if (upstreamType === NodeType.ImageInput) {
+    if (!rules.allowImages)
+      return false
+    return countUpstreamImageConnections(seedanceNode.id, nodes, edges) < rules.maxImages
+  }
+
+  if (upstreamType === NodeType.VideoInput) {
+    if (!rules.allowVideos)
+      return false
+    return countUpstreamVideoConnections(seedanceNode.id, nodes, edges) < rules.maxVideos
+  }
+
+  if (upstreamType === NodeType.AudioInput) {
+    if (!rules.allowAudios)
+      return false
+    return countUpstreamAudioConnections(seedanceNode.id, nodes, edges) < rules.maxAudios
+  }
+
+  return false
+}
+
 function getSeedanceUpstreamOptions(
   seedanceNodeId: string,
   nodes: WorkflowNode[],
@@ -23,20 +74,18 @@ function getSeedanceUpstreamOptions(
   if (!seedanceNode || seedanceNode.data.type !== NodeType.Seedance)
     return []
 
-  const mode = seedanceNode.data.generationMode ?? 'text_to_video'
-  const rules = getSeedanceModeInputRules(mode)
   const options: NodeType[] = []
 
-  if (rules.allowTextUpstream)
+  if (canConnectUpstreamType(seedanceNode, NodeType.TextPrompt, nodes, edges))
     options.push(NodeType.TextPrompt)
 
-  if (rules.allowImages && countUpstreamImageConnections(seedanceNodeId, nodes, edges) < rules.maxImages)
+  if (canConnectUpstreamType(seedanceNode, NodeType.ImageInput, nodes, edges))
     options.push(NodeType.ImageInput)
 
-  if (rules.allowVideos && countUpstreamVideoConnections(seedanceNodeId, nodes, edges) < rules.maxVideos)
+  if (canConnectUpstreamType(seedanceNode, NodeType.VideoInput, nodes, edges))
     options.push(NodeType.VideoInput)
 
-  if (rules.allowAudios && countUpstreamAudioConnections(seedanceNodeId, nodes, edges) < rules.maxAudios)
+  if (canConnectUpstreamType(seedanceNode, NodeType.AudioInput, nodes, edges))
     options.push(NodeType.AudioInput)
 
   return options
@@ -82,15 +131,13 @@ export function getConnectableNodeTypes(
       case NodeType.AudioInput:
         return [NodeType.Seedance]
       case NodeType.Seedance:
-        return [NodeType.Output]
+        return []
       default:
         return []
     }
   }
 
   switch (node.data.type) {
-    case NodeType.Output:
-      return [NodeType.Seedance]
     case NodeType.Seedance:
       return getSeedanceUpstreamOptions(node.id, nodes, edges)
     default:

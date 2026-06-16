@@ -1,9 +1,12 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
-import { saveWorkflowToServer } from '@/lib/save-workflow-api'
+import { useCallback, useEffect, useRef } from 'react'
+import { flushAllWorkflowSessionSaves, registerWorkflowAutoSaveFlush } from '@/lib/workflow-auto-save-control'
+import { saveWorkflowToServer, WorkflowSaveConflictError, broadcastWorkflowSaved } from '@/lib/save-workflow-api'
+import { rememberLastWorkflow } from '@/lib/workflow-last'
 import type { WorkflowSession } from '@/lib/workflow-session'
 import { useWorkflowAutoSaveStore } from '@/store/workflow-auto-save-store'
+import { useWorkflowCollaborationStore } from '@/store/workflow-collaboration-store'
 import { useWorkflowStore } from '@/store/workflow-store'
 
 const DEBOUNCE_MS = 800
@@ -20,34 +23,79 @@ function sessionSnapshot(session: WorkflowSession) {
 export default function WorkflowAutoSave() {
   const sessions = useWorkflowStore(s => s.sessions)
   const activeSessionId = useWorkflowStore(s => s.activeSessionId)
-  const hydrated = useRef(false)
+  const serverHydrated = useWorkflowStore(s => s.serverHydrated)
+  const isApplyingRemote = useWorkflowCollaborationStore(s => s.isApplyingRemote)
+  const setConflict = useWorkflowCollaborationStore(s => s.setConflict)
   const lastSnapshots = useRef(new Map<string, string>())
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const inflight = useRef(new Map<string, boolean>())
   const dirty = useRef(new Map<string, boolean>())
+  const activeSessionIdRef = useRef(activeSessionId)
 
   useEffect(() => {
-    const finish = () => {
-      hydrated.current = true
-      lastSnapshots.current = new Map(
-        useWorkflowStore.getState().sessions.map(session => [
-          session.id,
-          sessionSnapshot(session),
-        ]),
-      )
-    }
-
-    if (useWorkflowStore.persist.hasHydrated())
-      finish()
-    else
-      useWorkflowStore.persist.onFinishHydration(finish)
-  }, [])
+    activeSessionIdRef.current = activeSessionId
+  }, [activeSessionId])
 
   useEffect(() => {
-    if (!hydrated.current)
+    if (!serverHydrated)
+      return
+
+    lastSnapshots.current = new Map(
+      useWorkflowStore.getState().sessions.map(session => [
+        session.id,
+        sessionSnapshot(session),
+      ]),
+    )
+  }, [serverHydrated])
+
+  const reportSaveConflict = useCallback((
+    session: WorkflowSession,
+    serverWorkflow: Awaited<ReturnType<typeof saveWorkflowToServer>>,
+  ) => {
+    if (!session.workflowId)
+      return
+
+    setConflict({
+      workflowId: session.workflowId,
+      sessionId: session.id,
+      reason: 'save_conflict',
+      remote: {
+        workflowId: session.workflowId,
+        revision: serverWorkflow.revision,
+        name: serverWorkflow.name,
+        nodes: serverWorkflow.nodes,
+        edges: serverWorkflow.edges,
+        updatedAt: serverWorkflow.updatedAt,
+        sender: {
+          clientId: 'server',
+          userId: 'server',
+          name: '服务器版本',
+          image: null,
+        },
+      },
+      serverWorkflow: {
+        workflowId: session.workflowId,
+        revision: serverWorkflow.revision,
+        name: serverWorkflow.name,
+        nodes: serverWorkflow.nodes,
+        edges: serverWorkflow.edges,
+        updatedAt: serverWorkflow.updatedAt,
+        sender: {
+          clientId: 'server',
+          userId: 'server',
+          name: '服务器版本',
+          image: null,
+        },
+      },
+    })
+  }, [setConflict])
+
+  useEffect(() => {
+    if (!serverHydrated)
       return
 
     const setSaveState = useWorkflowAutoSaveStore.getState().setSaveState
+    const markLocalEdits = useWorkflowCollaborationStore.getState().markLocalEdits
 
     const flushSave = async (sessionId: string) => {
       if (inflight.current.get(sessionId)) {
@@ -66,7 +114,7 @@ export default function WorkflowAutoSave() {
 
       inflight.current.set(sessionId, true)
 
-      if (sessionId === activeSessionId)
+      if (sessionId === activeSessionIdRef.current)
         setSaveState({ status: 'saving', message: null })
 
       try {
@@ -74,54 +122,83 @@ export default function WorkflowAutoSave() {
           name: session.name,
           nodes: session.nodes,
           edges: session.edges,
+          expectedRevision: session.revision,
         })
 
+        const latestSession = useWorkflowStore.getState().sessions.find(s => s.id === sessionId)
         const store = useWorkflowStore.getState()
-        store.setSessionWorkflowMeta(sessionId, result.id, result.name)
+        store.setSessionWorkflowMeta(sessionId, result.id, result.name, result.revision)
 
         lastSnapshots.current.set(sessionId, sessionSnapshot({
-          ...session,
+          ...(latestSession ?? session),
           workflowId: result.id,
           name: result.name,
+          revision: result.revision,
         }))
 
-        if (sessionId === activeSessionId)
+        if (result.id)
+          markLocalEdits(result.id, false)
+
+        if (sessionId === activeSessionIdRef.current) {
           setSaveState({
             status: 'saved',
             message: null,
             lastSavedAt: Date.now(),
           })
+          void rememberLastWorkflow(result.id)
+        }
+
+        if (result.id)
+          broadcastWorkflowSaved(result.id, result.revision)
       }
       catch (error) {
         dirty.current.set(sessionId, true)
+        if (error instanceof WorkflowSaveConflictError) {
+          reportSaveConflict(session, error.serverWorkflow)
+          const message = error.message
+          if (sessionId === activeSessionIdRef.current)
+            setSaveState({ status: 'error', message })
+          return
+        }
+
         const message = error instanceof Error ? error.message : '自动保存失败'
-        if (sessionId === activeSessionId)
+        if (sessionId === activeSessionIdRef.current)
           setSaveState({ status: 'error', message })
       }
       finally {
         inflight.current.set(sessionId, false)
         if (dirty.current.get(sessionId))
-          flushSave(sessionId)
+          void flushSave(sessionId)
       }
     }
 
-    const scheduleSave = (sessionId: string) => {
+    const scheduleSave = (sessionId: string, immediate = false) => {
       dirty.current.set(sessionId, true)
-      if (sessionId === activeSessionId)
+      if (sessionId === activeSessionIdRef.current)
         setSaveState({ status: 'pending', message: null })
 
       const existing = timers.current.get(sessionId)
       if (existing)
         clearTimeout(existing)
 
+      if (immediate) {
+        timers.current.delete(sessionId)
+        void flushSave(sessionId)
+        return
+      }
+
       timers.current.set(
         sessionId,
         setTimeout(() => {
           timers.current.delete(sessionId)
-          flushSave(sessionId)
+          void flushSave(sessionId)
         }, DEBOUNCE_MS),
       )
     }
+
+    registerWorkflowAutoSaveFlush((sessionId, immediate) => {
+      scheduleSave(sessionId, immediate)
+    })
 
     for (const session of sessions) {
       const snapshot = sessionSnapshot(session)
@@ -129,12 +206,21 @@ export default function WorkflowAutoSave() {
 
       if (previous === undefined) {
         lastSnapshots.current.set(session.id, snapshot)
-        scheduleSave(session.id)
+        if (!isApplyingRemote)
+          scheduleSave(session.id)
         continue
       }
 
-      if (previous !== snapshot)
+      if (previous !== snapshot) {
+        if (isApplyingRemote) {
+          lastSnapshots.current.set(session.id, snapshot)
+          continue
+        }
+
+        if (session.workflowId)
+          markLocalEdits(session.workflowId, true)
         scheduleSave(session.id)
+      }
     }
 
     for (const sessionId of lastSnapshots.current.keys()) {
@@ -148,7 +234,24 @@ export default function WorkflowAutoSave() {
         inflight.current.delete(sessionId)
       }
     }
-  }, [sessions, activeSessionId])
+
+    return () => {
+      registerWorkflowAutoSaveFlush(null)
+    }
+  }, [sessions, serverHydrated, isApplyingRemote, reportSaveConflict])
+
+  useEffect(() => {
+    if (!serverHydrated)
+      return
+
+    const onPageHide = () => {
+      const sessionIds = useWorkflowStore.getState().sessions.map(session => session.id)
+      flushAllWorkflowSessionSaves(sessionIds)
+    }
+
+    window.addEventListener('pagehide', onPageHide)
+    return () => window.removeEventListener('pagehide', onPageHide)
+  }, [serverHydrated])
 
   useEffect(() => {
     return () => {

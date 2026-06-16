@@ -1,20 +1,22 @@
 import { NextResponse } from 'next/server'
+import { authErrorResponse, requireAuth } from '@/lib/auth/context'
 import { createWorkflow, listWorkflows } from '@/lib/workflow-storage'
 import type { WorkflowEdge, WorkflowNode } from '@/lib/types'
 
 export async function GET() {
   try {
-    const workflows = await listWorkflows()
+    const { workspaceId } = await requireAuth()
+    const workflows = await listWorkflows(workspaceId)
     return NextResponse.json({ workflows })
   }
   catch (error) {
-    const message = error instanceof Error ? error.message : '读取失败'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return authErrorResponse(error)
   }
 }
 
 export async function POST(request: Request) {
   try {
+    const { workspaceId, userId } = await requireAuth()
     const body = await request.json()
     const { name, nodes, edges } = body
 
@@ -23,6 +25,8 @@ export async function POST(request: Request) {
     }
 
     const workflow = await createWorkflow(
+      workspaceId,
+      userId,
       name || '未命名工作流',
       nodes as WorkflowNode[],
       edges as WorkflowEdge[],
@@ -31,7 +35,6 @@ export async function POST(request: Request) {
     return NextResponse.json(workflow)
   }
   catch (error) {
-    const message = error instanceof Error ? error.message : '保存失败'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return authErrorResponse(error)
   }
 }

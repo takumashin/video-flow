@@ -1,8 +1,12 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { v4 as uuidv4 } from 'uuid'
+import { and, desc, eq, isNull, or } from 'drizzle-orm'
+import { db } from '@/db'
+import { assets } from '@/db/schema'
+import { getAssetFolderById } from '@/lib/asset-folders/service'
 
-const UPLOAD_DIR = path.join(process.cwd(), 'data', 'uploads')
+const UPLOAD_ROOT = path.join(process.cwd(), 'data', 'uploads')
 
 const MIME_BY_EXT: Record<string, string> = {
   '.jpg': 'image/jpeg',
@@ -46,14 +50,18 @@ const EXT_BY_MIME: Record<string, string> = {
 
 export const UPLOAD_ID_PATTERN = /^[a-zA-Z0-9._-]+$/
 
-export async function ensureUploadDir() {
-  await fs.mkdir(UPLOAD_DIR, { recursive: true })
+function getWorkspaceUploadDir(workspaceId: string) {
+  return path.join(UPLOAD_ROOT, workspaceId)
 }
 
-export function getUploadFilePath(id: string) {
-  if (!UPLOAD_ID_PATTERN.test(id))
+export async function ensureUploadDir(workspaceId: string) {
+  await fs.mkdir(getWorkspaceUploadDir(workspaceId), { recursive: true })
+}
+
+export function getUploadFilePath(workspaceId: string, filename: string) {
+  if (!UPLOAD_ID_PATTERN.test(filename))
     throw new Error('无效的文件 ID')
-  return path.join(UPLOAD_DIR, id)
+  return path.join(getWorkspaceUploadDir(workspaceId), filename)
 }
 
 export function getMimeTypeFromFilename(filename: string): string {
@@ -65,21 +73,103 @@ export function getExtensionFromMime(mime: string): string {
   return EXT_BY_MIME[mime] ?? '.jpg'
 }
 
-export async function saveUpload(buffer: Buffer, mimeType: string): Promise<{ id: string; url: string }> {
-  await ensureUploadDir()
-  const ext = getExtensionFromMime(mimeType)
-  const id = `${uuidv4()}${ext}`
-  const filePath = path.join(UPLOAD_DIR, id)
-  await fs.writeFile(filePath, buffer)
-  return { id, url: `/api/uploads/${id}` }
+export type UploadAssetKind = 'image' | 'video' | 'audio'
+
+export type UploadListItem = {
+  id: string
+  url: string
+  kind: UploadAssetKind
+  filename: string
+  size: number
+  createdAt: number
+  folderId: string | null
 }
 
-export async function readUpload(id: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+export type UploadFolderFilter = 'all' | 'uncategorized' | string
+
+export function getUploadKindFromFilename(filename: string): UploadAssetKind | null {
+  const mime = getMimeTypeFromFilename(filename)
+  if (mime.startsWith('image/'))
+    return 'image'
+  if (mime.startsWith('video/'))
+    return 'video'
+  if (mime.startsWith('audio/'))
+    return 'audio'
+  return null
+}
+
+async function findAssetByFilename(filename: string) {
+  const [row] = await db
+    .select()
+    .from(assets)
+    .where(or(eq(assets.filename, filename), eq(assets.id, filename)))
+    .limit(1)
+
+  return row ?? null
+}
+
+export async function saveUpload(
+  buffer: Buffer,
+  mimeType: string,
+  workspaceId: string,
+  userId: string,
+  originalFilename?: string,
+  folderId?: string | null,
+): Promise<{ id: string, url: string, kind: UploadAssetKind }> {
+  await ensureUploadDir(workspaceId)
+
+  if (folderId) {
+    const folder = await getAssetFolderById(folderId, workspaceId)
+    if (!folder)
+      throw new Error('文件夹不存在')
+  }
+
+  const ext = getExtensionFromMime(mimeType)
+  const filename = `${uuidv4()}${ext}`
+  const storagePath = path.join('uploads', workspaceId, filename)
+  const filePath = path.join(process.cwd(), 'data', storagePath)
+  await fs.writeFile(filePath, buffer)
+
+  const kind = getUploadKindFromFilename(filename)
+  if (!kind)
+    throw new Error('不支持的文件类型')
+
+  const [row] = await db
+    .insert(assets)
+    .values({
+      workspaceId,
+      folderId: folderId ?? null,
+      kind,
+      filename,
+      storagePath,
+      mimeType,
+      size: buffer.length,
+      uploadedBy: userId,
+    })
+    .returning()
+
+  return {
+    id: row.filename,
+    url: `/api/uploads/${row.filename}`,
+    kind,
+  }
+}
+
+export async function readUpload(
+  filename: string,
+  workspaceId?: string,
+): Promise<{ buffer: Buffer, mimeType: string, workspaceId: string } | null> {
+  const asset = await findAssetByFilename(filename)
+  if (!asset)
+    return null
+
+  if (workspaceId && asset.workspaceId !== workspaceId)
+    return null
+
   try {
-    const filePath = getUploadFilePath(id)
+    const filePath = path.join(process.cwd(), 'data', asset.storagePath)
     const buffer = await fs.readFile(filePath)
-    const mimeType = getMimeTypeFromFilename(id)
-    return { buffer, mimeType }
+    return { buffer, mimeType: asset.mimeType, workspaceId: asset.workspaceId }
   }
   catch {
     return null
@@ -94,54 +184,71 @@ export async function readUploadAsDataUrl(id: string): Promise<string | null> {
   return `data:${file.mimeType};base64,${base64}`
 }
 
-export type UploadAssetKind = 'image' | 'video' | 'audio'
+export async function listUploads(
+  workspaceId: string,
+  folderFilter: UploadFolderFilter = 'all',
+): Promise<UploadListItem[]> {
+  const conditions = [eq(assets.workspaceId, workspaceId)]
 
-export type UploadListItem = {
-  id: string
-  url: string
-  kind: UploadAssetKind
-  filename: string
-  size: number
-  createdAt: number
+  if (folderFilter === 'uncategorized')
+    conditions.push(isNull(assets.folderId))
+  else if (folderFilter !== 'all')
+    conditions.push(eq(assets.folderId, folderFilter))
+
+  const rows = await db
+    .select()
+    .from(assets)
+    .where(and(...conditions))
+    .orderBy(desc(assets.createdAt))
+
+  return rows.map(row => ({
+    id: row.filename,
+    url: `/api/uploads/${row.filename}`,
+    kind: row.kind,
+    filename: row.filename,
+    size: row.size,
+    createdAt: row.createdAt.getTime(),
+    folderId: row.folderId,
+  }))
 }
 
-export function getUploadKindFromFilename(filename: string): UploadAssetKind | null {
-  const mime = getMimeTypeFromFilename(filename)
-  if (mime.startsWith('image/'))
-    return 'image'
-  if (mime.startsWith('video/'))
-    return 'video'
-  if (mime.startsWith('audio/'))
-    return 'audio'
-  return null
-}
+export async function moveUploadToFolder(
+  filename: string,
+  workspaceId: string,
+  folderId: string | null,
+): Promise<boolean> {
+  const asset = await findAssetByFilename(filename)
+  if (!asset || asset.workspaceId !== workspaceId)
+    return false
 
-export async function listUploads(): Promise<UploadListItem[]> {
-  await ensureUploadDir()
-  const entries = await fs.readdir(UPLOAD_DIR)
-  const items: UploadListItem[] = []
-
-  for (const filename of entries) {
-    const kind = getUploadKindFromFilename(filename)
-    if (!kind)
-      continue
-
-    const filePath = path.join(UPLOAD_DIR, filename)
-    const stat = await fs.stat(filePath)
-    if (!stat.isFile())
-      continue
-
-    items.push({
-      id: filename,
-      url: `/api/uploads/${filename}`,
-      kind,
-      filename,
-      size: stat.size,
-      createdAt: stat.mtimeMs,
-    })
+  if (folderId) {
+    const folder = await getAssetFolderById(folderId, workspaceId)
+    if (!folder)
+      return false
   }
 
-  return items.sort((a, b) => b.createdAt - a.createdAt)
+  await db
+    .update(assets)
+    .set({ folderId })
+    .where(eq(assets.id, asset.id))
+
+  return true
+}
+
+export async function deleteUpload(filename: string, workspaceId: string): Promise<boolean> {
+  const asset = await findAssetByFilename(filename)
+  if (!asset || asset.workspaceId !== workspaceId)
+    return false
+
+  try {
+    await fs.unlink(path.join(process.cwd(), 'data', asset.storagePath))
+  }
+  catch {
+    // file may already be gone
+  }
+
+  await db.delete(assets).where(eq(assets.id, asset.id))
+  return true
 }
 
 export function extractUploadId(imageUrl: string): string | null {

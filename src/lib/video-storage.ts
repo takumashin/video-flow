@@ -1,11 +1,14 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { v4 as uuidv4 } from 'uuid'
+import { eq, or } from 'drizzle-orm'
+import { db } from '@/db'
+import { generatedVideos } from '@/db/schema'
 import { extractVideoId, isLocalVideoUrl, VIDEO_ID_PATTERN } from './video-url'
 
 export { extractVideoId, isLocalVideoUrl, VIDEO_ID_PATTERN } from './video-url'
 
-const VIDEO_DIR = path.join(process.cwd(), 'data', 'videos')
+const VIDEO_ROOT = path.join(process.cwd(), 'data', 'videos')
 
 const MIME_BY_EXT: Record<string, string> = {
   '.mp4': 'video/mp4',
@@ -19,14 +22,18 @@ const EXT_BY_MIME: Record<string, string> = {
   'video/quicktime': '.mov',
 }
 
-export async function ensureVideoDir() {
-  await fs.mkdir(VIDEO_DIR, { recursive: true })
+function getWorkspaceVideoDir(workspaceId: string) {
+  return path.join(VIDEO_ROOT, workspaceId)
 }
 
-export function getVideoFilePath(id: string) {
-  if (!VIDEO_ID_PATTERN.test(id))
+export async function ensureVideoDir(workspaceId: string) {
+  await fs.mkdir(getWorkspaceVideoDir(workspaceId), { recursive: true })
+}
+
+export function getVideoFilePath(workspaceId: string, filename: string) {
+  if (!VIDEO_ID_PATTERN.test(filename))
     throw new Error('无效的视频 ID')
-  return path.join(VIDEO_DIR, id)
+  return path.join(getWorkspaceVideoDir(workspaceId), filename)
 }
 
 export function getMimeTypeFromVideoFilename(filename: string): string {
@@ -39,8 +46,22 @@ export function getExtensionFromVideoMime(mime: string): string {
   return EXT_BY_MIME[base] ?? '.mp4'
 }
 
-/** 将火山返回的远程 URL 下载到本地 data/videos，返回站内访问路径 */
-export async function saveVideoFromUrl(sourceUrl: string): Promise<{ id: string; url: string }> {
+async function findVideoByFilename(filename: string) {
+  const [row] = await db
+    .select()
+    .from(generatedVideos)
+    .where(or(eq(generatedVideos.filename, filename), eq(generatedVideos.id, filename)))
+    .limit(1)
+
+  return row ?? null
+}
+
+export async function saveVideoFromUrl(
+  sourceUrl: string,
+  workspaceId: string,
+  userId: string,
+  sourceTaskId?: string,
+): Promise<{ id: string, url: string }> {
   const trimmed = sourceUrl.trim()
   if (!trimmed)
     throw new Error('视频地址为空')
@@ -58,19 +79,42 @@ export async function saveVideoFromUrl(sourceUrl: string): Promise<{ id: string;
   const ext = getExtensionFromVideoMime(contentType)
   const buffer = Buffer.from(await response.arrayBuffer())
 
-  await ensureVideoDir()
-  const id = `${uuidv4()}${ext}`
-  await fs.writeFile(path.join(VIDEO_DIR, id), buffer)
+  await ensureVideoDir(workspaceId)
+  const filename = `${uuidv4()}${ext}`
+  const storagePath = path.join('videos', workspaceId, filename)
+  await fs.writeFile(path.join(process.cwd(), 'data', storagePath), buffer)
 
-  return { id, url: `/api/videos/${id}` }
+  const [row] = await db
+    .insert(generatedVideos)
+    .values({
+      workspaceId,
+      filename,
+      storagePath,
+      sourceTaskId,
+      mimeType: contentType.split(';')[0],
+      size: buffer.length,
+      createdBy: userId,
+    })
+    .returning()
+
+  return { id: row.filename, url: `/api/videos/${row.filename}` }
 }
 
-export async function readVideo(id: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+export async function readVideo(
+  filename: string,
+  workspaceId?: string,
+): Promise<{ buffer: Buffer, mimeType: string, workspaceId: string } | null> {
+  const video = await findVideoByFilename(filename)
+  if (!video)
+    return null
+
+  if (workspaceId && video.workspaceId !== workspaceId)
+    return null
+
   try {
-    const filePath = getVideoFilePath(id)
+    const filePath = path.join(process.cwd(), 'data', video.storagePath)
     const buffer = await fs.readFile(filePath)
-    const mimeType = getMimeTypeFromVideoFilename(id)
-    return { buffer, mimeType }
+    return { buffer, mimeType: video.mimeType, workspaceId: video.workspaceId }
   }
   catch {
     return null

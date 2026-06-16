@@ -3,6 +3,43 @@ import { NodeType } from './types'
 import { validateSeedanceMode } from './seedance-modes'
 import { getOrderedUpstreamImageNodes, getUpstreamNodes } from './workflow-engine'
 
+export function resolveSeedanceModeForConnection(
+  sourceNode: WorkflowNode,
+  targetNode: WorkflowNode,
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+): SeedanceGenerationMode | null {
+  if (targetNode.data.type !== NodeType.Seedance)
+    return null
+
+  const currentMode = targetNode.data.generationMode ?? 'text_to_video'
+
+  if (sourceNode.data.type === NodeType.ImageInput) {
+    if (currentMode === 'text_to_video')
+      return 'image_to_video'
+
+    const existingCount = countUpstreamImageConnections(targetNode.id, nodes, edges, {
+      excludeSourceId: sourceNode.id,
+    })
+    const totalAfterConnect = existingCount + 1
+
+    if (currentMode === 'image_to_video' && totalAfterConnect >= 2)
+      return 'first_last_frame'
+
+    return null
+  }
+
+  if (
+    sourceNode.data.type === NodeType.VideoInput
+    || sourceNode.data.type === NodeType.AudioInput
+  ) {
+    if (currentMode !== 'omni_reference')
+      return 'omni_reference'
+  }
+
+  return null
+}
+
 export type SeedanceModeInputRules = {
   allowImages: boolean
   maxImages: number
@@ -133,7 +170,8 @@ export function validateSeedanceConnection(
   if (targetNode.data.type !== NodeType.Seedance)
     return { ok: true }
 
-  const mode = targetNode.data.generationMode ?? 'text_to_video'
+  const autoMode = resolveSeedanceModeForConnection(sourceNode, targetNode, nodes, edges)
+  const mode = autoMode ?? (targetNode.data.generationMode ?? 'text_to_video')
   const rules = getSeedanceModeInputRules(mode)
 
   if (sourceNode.data.type === NodeType.TextPrompt) {

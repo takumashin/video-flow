@@ -130,7 +130,7 @@ export function resolveConnectNodePosition(
   menu: ConnectNodeMenuState,
   nodeType: NodeType,
 ): { x: number; y: number } {
-  const width = nodeType === NodeType.Output ? 360 : 300
+  const width = nodeType === NodeType.Seedance ? 360 : 300
   const xOffset = menu.handleType === 'source' ? 24 : -width - 24
 
   return {

@@ -14,7 +14,8 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { saveWorkflowToServer } from '@/lib/save-workflow-api'
-import { btnSecondaryClass, dropdownClass } from '@/lib/ui-classes'
+import { rememberLastWorkflow } from '@/lib/workflow-last'
+import { btnCompactClass, btnSecondaryClass, dropdownAnchorClass, dropdownClass } from '@/lib/ui-classes'
 import { sanitizeNodesForSave } from '@/lib/sanitize-workflow'
 import type { SavedWorkflow, WorkflowSummary } from '@/lib/types'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
@@ -30,7 +31,7 @@ function formatTime(timestamp: number) {
   })
 }
 
-function AutoSaveIndicator() {
+function AutoSaveIndicator({ compact = false }: { compact?: boolean }) {
   const status = useWorkflowAutoSaveStore(s => s.status)
   const message = useWorkflowAutoSaveStore(s => s.message)
   const lastSavedAt = useWorkflowAutoSaveStore(s => s.lastSavedAt)
@@ -67,7 +68,8 @@ function AutoSaveIndicator() {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium',
+        'inline-flex items-center gap-1.5 rounded-lg border font-medium',
+        compact ? 'px-2 py-1 text-[11px]' : 'px-2.5 py-1.5 text-xs',
         status === 'error'
           ? 'border-red-500/30 bg-red-500/10 text-red-500'
           : 'border-border bg-input text-muted',
@@ -80,7 +82,13 @@ function AutoSaveIndicator() {
   )
 }
 
-export default function WorkflowManager() {
+export default function WorkflowManager({
+  compact = false,
+  menuPlacement = 'below',
+}: {
+  compact?: boolean
+  menuPlacement?: 'above' | 'below'
+}) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [listLoading, setListLoading] = useState(false)
@@ -90,6 +98,7 @@ export default function WorkflowManager() {
   const panelRef = useRef<HTMLDivElement>(null)
 
   const activeSession = useActiveWorkflowSession()
+  const sessions = useWorkflowStore(s => s.sessions)
   const isRunning = activeSession?.isRunning ?? false
   const workflowId = activeSession?.workflowId ?? null
   const workflowName = activeSession?.name ?? ''
@@ -151,6 +160,7 @@ export default function WorkflowManager() {
         name: result.name,
         nodes: result.nodes,
         edges: result.edges,
+        revision: result.revision,
       }, { newTab: false })
       addLog({
         nodeId: 'system',
@@ -190,7 +200,10 @@ export default function WorkflowManager() {
         name: data.name,
         nodes: data.nodes,
         edges: data.edges,
+        revision: data.revision,
       })
+
+      void rememberLastWorkflow(data.id)
 
       setMessage(`已打开「${data.name}」`)
       setOpen(false)
@@ -291,23 +304,23 @@ export default function WorkflowManager() {
         placeholder="工作流名称"
       />
 
-      <AutoSaveIndicator />
+      <AutoSaveIndicator compact={compact} />
 
       <button
         type="button"
         disabled={isRunning}
         onClick={() => setOpen(v => !v)}
         className={cn(
-          btnSecondaryClass,
+          compact ? btnCompactClass : btnSecondaryClass,
           open && 'border-primary-light bg-primary/10 text-primary-light',
         )}
       >
-        <FolderOpen className="h-4 w-4" />
+        <FolderOpen className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
         工作流
       </button>
 
       {open && (
-        <div className={`absolute right-0 top-full z-[110] mt-2 w-[360px] ${dropdownClass}`}>
+        <div className={cn(dropdownAnchorClass(menuPlacement, 'right'), `w-[360px] ${dropdownClass}`)}>
             <div className="border-b border-border-subtle px-4 py-3">
               <p className="text-sm font-semibold text-foreground">我的工作流</p>
               <p className="text-xs text-muted">修改会自动保存；可打开、导出或另存为副本</p>
@@ -385,7 +398,7 @@ export default function WorkflowManager() {
                           key={item.id}
                           className={cn(
                             'mb-1 flex items-center gap-2 rounded-lg border px-2 py-2',
-                            workflowId === item.id
+                            sessions.some(session => session.workflowId === item.id)
                               ? 'border-primary-light bg-primary/10'
                               : 'border-transparent hover:bg-surface-muted',
                           )}

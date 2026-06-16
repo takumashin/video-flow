@@ -3,23 +3,38 @@ import {
   getMaxSizeForKind,
   getUploadKind,
 } from '@/lib/media-upload-shared'
-import { listUploads, saveUpload } from '@/lib/uploads'
+import { authErrorResponse, requireAuth } from '@/lib/auth/context'
+import { listUploads, saveUpload, type UploadFolderFilter } from '@/lib/uploads'
 
-export async function GET() {
+function parseFolderFilter(value: string | null): UploadFolderFilter {
+  if (!value || value === 'all')
+    return 'all'
+  if (value === 'uncategorized')
+    return 'uncategorized'
+  return value
+}
+
+export async function GET(request: Request) {
   try {
-    const uploads = await listUploads()
+    const { workspaceId } = await requireAuth()
+    const folder = parseFolderFilter(new URL(request.url).searchParams.get('folderId'))
+    const uploads = await listUploads(workspaceId, folder)
     return NextResponse.json({ uploads })
   }
   catch (error) {
-    const message = error instanceof Error ? error.message : '加载资产失败'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return authErrorResponse(error)
   }
 }
 
 export async function POST(request: Request) {
   try {
+    const { workspaceId, userId } = await requireAuth()
     const formData = await request.formData()
     const file = formData.get('file')
+    const folderIdRaw = formData.get('folderId')
+    const folderId = typeof folderIdRaw === 'string' && folderIdRaw.trim()
+      ? folderIdRaw.trim()
+      : null
 
     if (!file || !(file instanceof File)) {
       return NextResponse.json({ error: '请上传文件' }, { status: 400 })
@@ -40,7 +55,7 @@ export async function POST(request: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer())
     const mimeType = file.type || (kind === 'image' ? 'image/jpeg' : kind === 'video' ? 'video/mp4' : 'audio/mpeg')
-    const { id, url } = await saveUpload(buffer, mimeType)
+    const { id, url } = await saveUpload(buffer, mimeType, workspaceId, userId, file.name, folderId)
 
     return NextResponse.json({
       id,
@@ -48,10 +63,13 @@ export async function POST(request: Request) {
       filename: file.name,
       size: file.size,
       kind,
+      folderId,
     })
   }
   catch (error) {
-    const message = error instanceof Error ? error.message : '上传失败'
-    return NextResponse.json({ error: message }, { status: 500 })
+    if (error instanceof Error && error.message === '文件夹不存在') {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+    return authErrorResponse(error)
   }
 }

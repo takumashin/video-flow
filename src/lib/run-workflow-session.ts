@@ -12,6 +12,9 @@ import type { ExecutionContext } from './workflow-engine'
 import type { WorkflowSession } from './workflow-session'
 import type { RunLogEntry, SeedanceNodeData, SeedanceTaskStatus, WorkflowNodeData } from './types'
 import { NodeType } from './types'
+import { notifyCreditsChanged } from '@/lib/credits/client-events'
+import { formatSeedanceUserError } from '@/lib/seedance-error-messages'
+import { flushWorkflowSessionSave } from '@/lib/workflow-auto-save-control'
 
 function mapTaskStatusToNodeStatus(
   status: SeedanceTaskStatus,
@@ -29,13 +32,16 @@ export type RunSeedanceDeps = {
     taskId: string
     prompt?: string
     nodeTitle?: string
-    status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+    status: SeedanceTaskStatus
     progress?: number
     videoUrl?: string
     createdAt: number
+    progressStartedAt?: number
+    workflowId?: string | null
+    nodeId?: string
   }) => void
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void
-  appendOutputVideo: (nodeId: string, item: { videoUrl: string; taskId?: string; createdAt: number }) => void
+  appendSeedanceVideo: (nodeId: string, item: { videoUrl: string; taskId?: string; createdAt: number }) => void
   addLog: (entry: Omit<RunLogEntry, 'id' | 'timestamp'>) => void
   clearLogs: () => void
   getNodes: () => WorkflowSession['nodes']
@@ -52,13 +58,15 @@ async function pollAndCompleteSeedanceTask(
   node: { id: string; data: SeedanceNodeData },
   deps: RunSeedanceDeps,
   payload: {
+    sessionId: string
     taskId: string
     prompt: string
     progressStartedAt: number
     signal?: AbortSignal
+    workflowId?: string | null
   },
 ) {
-  const { taskId, prompt, progressStartedAt, signal } = payload
+  const { sessionId, taskId, prompt, progressStartedAt, signal, workflowId } = payload
 
   const pollResult = await pollSeedanceTaskClient(taskId, {
     intervalMs: SEEDANCE_POLL_INTERVAL_MS,
@@ -68,10 +76,17 @@ async function pollAndCompleteSeedanceTask(
       if (result.status === 'succeeded' || result.status === 'failed' || result.status === 'cancelled')
         return
 
+      const isSystemQueue = result.status === 'waiting' || result.status === 'submitting'
+      const activeProgressStartedAt = isSystemQueue
+        ? undefined
+        : (result.progressStartedAt ?? progressStartedAt)
+
       deps.updateNodeData(node.id, {
         status: 'running',
         progress: result.progress,
-        progressStartedAt,
+        progressStartedAt: activeProgressStartedAt,
+        taskStatus: result.status,
+        queuePosition: result.queuePosition,
       })
       deps.upsertLocalTask({
         id: taskId,
@@ -82,24 +97,67 @@ async function pollAndCompleteSeedanceTask(
         progress: result.progress,
         videoUrl: result.videoUrl,
         createdAt: progressStartedAt,
+        progressStartedAt: activeProgressStartedAt,
+        workflowId,
+        nodeId: node.id,
       })
     },
   })
 
   if (pollResult.status !== 'succeeded') {
+    if (pollResult.status === 'cancelled') {
+      deps.updateNodeData(node.id, {
+        status: 'idle',
+        progress: undefined,
+        progressStartedAt: undefined,
+        taskId: undefined,
+        taskStatus: undefined,
+        queuePosition: undefined,
+        error: undefined,
+      })
+      deps.upsertLocalTask({
+        id: taskId,
+        taskId,
+        prompt,
+        nodeTitle: node.data.title,
+        status: 'cancelled',
+        progress: 0,
+        createdAt: progressStartedAt,
+        workflowId,
+        nodeId: node.id,
+      })
+      deps.addLog({
+        nodeId: node.id,
+        nodeTitle: node.data.title,
+        message: '任务已取消',
+        level: 'info',
+      })
+      return
+    }
+
+    const failureMessage = formatSeedanceUserError(
+      pollResult.error,
+      pollResult.errorCode,
+      '视频生成失败',
+    )
+
     deps.updateNodeData(node.id, {
       status: mapTaskStatusToNodeStatus(pollResult.status),
       progress: pollResult.progress,
       progressStartedAt: undefined,
-      error: pollResult.error || '视频生成失败',
+      taskStatus: undefined,
+      queuePosition: undefined,
+      error: failureMessage,
     })
     deps.addLog({
       nodeId: node.id,
       nodeTitle: node.data.title,
-      message: pollResult.error || '视频生成失败',
+      message: failureMessage,
       level: 'error',
     })
-    throw new Error(pollResult.error || '视频生成失败')
+    notifyCreditsChanged()
+    flushWorkflowSessionSave(sessionId)
+    throw new Error(failureMessage)
   }
 
   const remoteVideoUrl = pollResult.videoUrl
@@ -110,14 +168,18 @@ async function pollAndCompleteSeedanceTask(
       progressStartedAt: undefined,
       error: '生成成功但未返回视频地址',
     })
+    flushWorkflowSessionSave(sessionId)
     throw new Error('生成成功但未返回视频地址')
   }
 
   deps.updateNodeData(node.id, {
     status: 'succeeded',
     taskId,
+    videoUrl: remoteVideoUrl,
     progress: 100,
     progressStartedAt: undefined,
+    taskStatus: undefined,
+    queuePosition: undefined,
     error: undefined,
   })
   deps.upsertLocalTask({
@@ -129,6 +191,8 @@ async function pollAndCompleteSeedanceTask(
     progress: 100,
     videoUrl: remoteVideoUrl,
     createdAt: progressStartedAt,
+    workflowId,
+    nodeId: node.id,
   })
 
   let finalVideoUrl: string = remoteVideoUrl
@@ -160,6 +224,8 @@ async function pollAndCompleteSeedanceTask(
       progress: 100,
       videoUrl: finalVideoUrl,
       createdAt: progressStartedAt,
+      workflowId,
+      nodeId: node.id,
     })
   }
 
@@ -172,18 +238,11 @@ async function pollAndCompleteSeedanceTask(
     level: 'success',
   })
 
-  const currentEdges = deps.getEdges()
-  const downstream = currentEdges.filter(e => e.source === node.id)
-  for (const edge of downstream) {
-    const target = deps.getNodes().find(n => n.id === edge.target)
-    if (target?.data.type === NodeType.Output) {
-      deps.appendOutputVideo(target.id, {
-        videoUrl: finalVideoUrl,
-        taskId,
-        createdAt: Date.now(),
-      })
-    }
-  }
+  deps.appendSeedanceVideo(node.id, {
+    videoUrl: finalVideoUrl,
+    taskId,
+    createdAt: Date.now(),
+  })
 }
 
 export async function resumeSeedanceNodeSession(
@@ -222,10 +281,12 @@ export async function resumeSeedanceNodeSession(
     { id: node.id, data: node.data },
     deps,
     {
+      sessionId: options.sessionId,
       taskId: node.data.taskId,
       prompt: node.data.prompt,
       progressStartedAt,
       signal: options.signal,
+      workflowId: session.workflowId,
     },
   )
 }
@@ -270,6 +331,8 @@ export async function runSeedanceNodeSession(
     taskId: undefined,
     progress: 0,
     progressStartedAt: undefined,
+    taskStatus: undefined,
+    queuePosition: undefined,
   })
   deps.addLog({
     nodeId: node.id,
@@ -292,6 +355,9 @@ export async function runSeedanceNodeSession(
       audios: requestAudios,
       generationMode: node.data.generationMode ?? 'text_to_video',
       model: node.data.model || undefined,
+      nodeTitle: node.data.title,
+      workflowId: session.workflowId ?? undefined,
+      nodeId: node.id,
       ratio: node.data.ratio,
       resolution: node.data.resolution ?? '720p',
       duration: node.data.duration,
@@ -307,38 +373,68 @@ export async function runSeedanceNodeSession(
   const createResult = await response.json()
 
   if (!response.ok) {
+    const createErrorCode = typeof createResult.code === 'string' ? createResult.code : undefined
+    const createErrorMessage = formatSeedanceUserError(
+      typeof createResult.error === 'string' ? createResult.error : undefined,
+      createErrorCode,
+      '生成失败',
+    )
+
     deps.updateNodeData(node.id, {
       status: 'failed',
       progress: 0,
       progressStartedAt: undefined,
-      error: createResult.error || '生成失败',
+      error: createErrorMessage,
     })
     deps.addLog({
       nodeId: node.id,
       nodeTitle: node.data.title,
-      message: createResult.error || '生成失败',
+      message: createErrorMessage,
       level: 'error',
     })
-    throw new Error(createResult.error || '生成失败')
+    flushWorkflowSessionSave(options.sessionId)
+    throw new Error(createErrorMessage)
   }
 
   const taskId = createResult.taskId
+  notifyCreditsChanged()
+  const initialStatus = (createResult.status as SeedanceTaskStatus | undefined) ?? 'queued'
+  const queuePosition = typeof createResult.queuePosition === 'number'
+    ? createResult.queuePosition
+    : undefined
+  const isSystemQueue = initialStatus === 'waiting' || initialStatus === 'submitting'
   const progressStartedAt = Date.now()
-  const initialProgress = computeFakeSeedanceProgress(progressStartedAt, 'queued')
-  deps.updateNodeData(node.id, { taskId, progress: initialProgress, progressStartedAt })
+  const initialProgress = isSystemQueue
+    ? 0
+    : computeFakeSeedanceProgress(progressStartedAt, 'queued')
+
+  deps.updateNodeData(node.id, {
+    taskId,
+    progress: initialProgress,
+    progressStartedAt: isSystemQueue ? undefined : progressStartedAt,
+    taskStatus: initialStatus,
+    queuePosition,
+  })
   deps.upsertLocalTask({
     id: taskId,
     taskId,
     prompt: inputs.prompt,
     nodeTitle: node.data.title,
-    status: 'queued',
+    status: initialStatus,
     progress: initialProgress,
     createdAt: progressStartedAt,
+    progressStartedAt: isSystemQueue ? undefined : progressStartedAt,
+    workflowId: session.workflowId,
+    nodeId: node.id,
   })
   deps.addLog({
     nodeId: node.id,
     nodeTitle: node.data.title,
-    message: `任务已提交，开始查询进度，任务 ID: ${taskId}`,
+    message: isSystemQueue
+      ? queuePosition != null && queuePosition > 1
+        ? `已进入系统排队（第 ${queuePosition} 位），任务 ID: ${taskId}`
+        : `已进入系统排队，任务 ID: ${taskId}`
+      : `任务已提交，开始查询进度，任务 ID: ${taskId}`,
     level: 'info',
   })
 
@@ -346,10 +442,12 @@ export async function runSeedanceNodeSession(
     { id: node.id, data: node.data },
     deps,
     {
+      sessionId: options.sessionId,
       taskId,
       prompt: inputs.prompt ?? node.data.prompt ?? '',
       progressStartedAt,
       signal: options.signal,
+      workflowId: session.workflowId,
     },
   )
 }
@@ -377,7 +475,11 @@ export function handleSeedanceSessionError(
     return
   }
 
-  const message = error instanceof Error ? error.message : '运行失败'
+  const message = formatSeedanceUserError(
+    error instanceof Error ? error.message : undefined,
+    undefined,
+    '运行失败',
+  )
   deps.updateNodeData(nodeId, {
     status: 'failed',
     progress: undefined,
@@ -390,6 +492,7 @@ export function handleSeedanceSessionError(
     message,
     level: 'error',
   })
+  flushWorkflowSessionSave(options.sessionId)
 }
 
 export function finalizeSeedanceSessionJob(options: RunSeedanceOptions, nodeId: string) {

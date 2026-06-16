@@ -15,6 +15,54 @@ export function isActiveSeedanceTaskStatus(
   return status === 'queued' || status === 'running'
 }
 
+export function isQueuedSeedanceTaskStatus(
+  status: SeedanceTaskStatus | undefined,
+): boolean {
+  return status === 'waiting' || status === 'submitting' || status === 'queued'
+}
+
+export function isSystemQueuedSeedanceTaskStatus(
+  status: SeedanceTaskStatus | undefined,
+): boolean {
+  return status === 'waiting' || status === 'submitting'
+}
+
+/** 节点 / 按钮上展示的任务阶段文案 */
+export function getSeedanceTaskPhaseLabel(options: {
+  taskStatus?: SeedanceTaskStatus
+  queuePosition?: number
+  progress?: number
+  generatingVideo?: boolean
+}): string {
+  const { taskStatus, queuePosition, progress, generatingVideo = true } = options
+
+  if (taskStatus === 'waiting') {
+    return queuePosition != null && queuePosition > 0
+      ? `系统排队中 #${queuePosition}`
+      : '系统排队中'
+  }
+
+  if (taskStatus === 'submitting')
+    return '提交 Seedance 中…'
+
+  if (taskStatus === 'queued') {
+    return progress != null
+      ? `Seedance 排队中 ${progress}%`
+      : 'Seedance 排队中…'
+  }
+
+  if (taskStatus === 'running') {
+    return progress != null
+      ? `生成中 ${progress}%`
+      : '生成中…'
+  }
+
+  if (generatingVideo)
+    return progress != null ? `生成中 ${progress}%` : '正在生成视频…'
+
+  return progress != null ? `生成中 ${progress}%` : '生成中…'
+}
+
 /** 基于开始时间的平滑假进度，未完成前最高 99%，成功后 100% */
 export function computeFakeSeedanceProgress(
   startedAtMs: number,

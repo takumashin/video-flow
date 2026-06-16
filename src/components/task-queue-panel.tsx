@@ -13,6 +13,7 @@ import {
   ListOrdered,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { localizeSeedanceErrorMessage } from '@/lib/seedance-error-messages'
 import { computeFakeSeedanceProgress, SEEDANCE_POLL_INTERVAL_MS } from '@/lib/seedance-progress'
 import { useFakeSeedanceProgress } from '@/lib/use-fake-seedance-progress'
 import { TaskProgressBar } from '@/components/canvas/node-fields'
@@ -20,10 +21,13 @@ import VideoDownloadLink from '@/components/video-download-link'
 import type { LocalTaskQueueItem } from '@/store/task-queue-store'
 import type { SeedanceTaskListItem, SeedanceTaskStatus } from '@/lib/types'
 import { useTaskQueueStore } from '@/store/task-queue-store'
+import { useWorkflowStore } from '@/store/workflow-store'
+import { notifyCreditsChanged } from '@/lib/credits/client-events'
 
 const STATUS_FILTERS: Array<{ value: SeedanceTaskStatus | 'all'; label: string }> = [
   { value: 'all', label: '全部' },
-  { value: 'queued', label: '排队中' },
+  { value: 'waiting', label: '系统排队' },
+  { value: 'queued', label: 'Seedance 排队' },
   { value: 'running', label: '生成中' },
   { value: 'succeeded', label: '已完成' },
   { value: 'failed', label: '失败' },
@@ -31,7 +35,9 @@ const STATUS_FILTERS: Array<{ value: SeedanceTaskStatus | 'all'; label: string }
 ]
 
 const STATUS_META: Record<SeedanceTaskStatus, { label: string; className: string }> = {
-  queued: { label: '排队中', className: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' },
+  waiting: { label: '系统排队', className: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' },
+  submitting: { label: '提交中', className: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' },
+  queued: { label: 'Seedance 排队', className: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' },
   running: { label: '生成中', className: 'bg-primary/15 text-primary-light' },
   succeeded: { label: '已完成', className: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' },
   failed: { label: '失败', className: 'bg-red-500/15 text-red-600 dark:text-red-400' },
@@ -45,13 +51,23 @@ function formatTaskTime(ts?: number) {
   return new Date(ms).toLocaleString()
 }
 
-function StatusBadge({ status, progress }: { status: SeedanceTaskStatus; progress?: number }) {
+function StatusBadge({
+  status,
+  progress,
+  queuePosition,
+}: {
+  status: SeedanceTaskStatus
+  progress?: number
+  queuePosition?: number
+}) {
   const meta = STATUS_META[status]
   const progressValue = progress != null ? Math.min(100, Math.max(0, progress)) : null
 
-  const label = (status === 'queued' || status === 'running') && progressValue != null
-    ? `${meta.label} ${progressValue}%`
-    : meta.label
+  let label = meta.label
+  if (status === 'waiting' && queuePosition != null)
+    label = `${meta.label} #${queuePosition}`
+  else if ((status === 'queued' || status === 'running') && progressValue != null)
+    label = `${meta.label} ${progressValue}%`
 
   return (
     <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium', meta.className)}>
@@ -75,8 +91,12 @@ function TaskProgressSection({ status, progress }: { status: SeedanceTaskStatus;
 }
 
 function resolveTaskStartedAtMs(task: SeedanceTaskListItem, local?: LocalTaskQueueItem) {
+  if (local?.progressStartedAt)
+    return local.progressStartedAt
   if (local?.createdAt)
     return local.createdAt
+  if (task.progressStartedAt)
+    return task.progressStartedAt
   if (task.created_at)
     return task.created_at > 1e12 ? task.created_at : task.created_at * 1000
   return undefined
@@ -86,12 +106,18 @@ function TaskQueueRow({
   task,
   local,
   savingId,
+  actionId,
   onSaveToLocal,
+  onResume,
+  onCancel,
 }: {
   task: SeedanceTaskListItem
   local?: LocalTaskQueueItem
   savingId: string | null
+  actionId: string | null
   onSaveToLocal: (task: SeedanceTaskListItem) => void
+  onResume: (task: SeedanceTaskListItem) => void
+  onCancel: (task: SeedanceTaskListItem) => void
 }) {
   const startedAtMs = resolveTaskStartedAtMs(task, local)
   const displayProgress = useFakeSeedanceProgress(
@@ -101,22 +127,25 @@ function TaskQueueRow({
   )
   const videoUrl = task.content?.video_url ?? local?.videoUrl
   const isLocal = videoUrl?.startsWith('/api/videos/')
+  const prompt = local?.prompt ?? task.prompt
+  const nodeTitle = local?.nodeTitle ?? task.nodeTitle
+  const canCancel = task.status === 'waiting' || task.status === 'submitting' || task.status === 'queued'
 
   return (
     <li className="px-4 py-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={task.status} progress={displayProgress} />
-            {local?.nodeTitle && (
-              <span className="truncate text-[10px] text-muted">{local.nodeTitle}</span>
+            <StatusBadge status={task.status} progress={displayProgress} queuePosition={task.queuePosition} />
+            {nodeTitle && (
+              <span className="truncate text-[10px] text-muted">{nodeTitle}</span>
             )}
             {task.model && (
               <span className="truncate text-[10px] text-muted">{task.model}</span>
             )}
           </div>
-          {local?.prompt && (
-            <p className="mt-1 line-clamp-2 text-[11px] text-secondary">{local.prompt}</p>
+          {prompt && (
+            <p className="mt-1 line-clamp-2 text-[11px] text-secondary">{prompt}</p>
           )}
           <p className="mt-1 break-all font-mono text-[10px] text-secondary">
             {task.id}
@@ -129,8 +158,8 @@ function TaskQueueRow({
           </p>
           <TaskProgressSection status={task.status} progress={displayProgress} />
           {task.error?.message && (
-            <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">
-              {task.error.message}
+            <p className="mt-1 break-all text-[10px] text-red-600 dark:text-red-400">
+              {localizeSeedanceErrorMessage(task.error.message, task.error.code)}
             </p>
           )}
         </div>
@@ -183,6 +212,38 @@ function TaskQueueRow({
         </div>
       )}
 
+      {(task.status === 'queued' || task.status === 'running') && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={actionId === task.id}
+            onClick={() => onResume(task)}
+            className="inline-flex items-center gap-1 rounded-md border border-primary-light/30 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary-light hover:bg-primary/15 disabled:opacity-50"
+          >
+            {actionId === task.id
+              ? <Loader2 className="h-3 w-3 animate-spin" />
+              : <RefreshCw className="h-3 w-3" />}
+            恢复跟踪
+          </button>
+        </div>
+      )}
+
+      {canCancel && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={actionId === task.id}
+            onClick={() => onCancel(task)}
+            className="inline-flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-600 hover:bg-red-500/15 disabled:opacity-50 dark:text-red-400"
+          >
+            {actionId === task.id
+              ? <Loader2 className="h-3 w-3 animate-spin" />
+              : <X className="h-3 w-3" />}
+            取消任务
+          </button>
+        </div>
+      )}
+
       {(task.status === 'queued' || task.status === 'running') && displayProgress == null && (
         <div className="mt-2 flex items-center gap-1.5 text-[10px] text-primary-light">
           <Loader2 className="h-3 w-3 animate-spin" />
@@ -203,12 +264,15 @@ export default function TaskQueuePanel() {
   const pageSize = useTaskQueueStore(s => s.pageSize)
   const localTasks = useTaskQueueStore(s => s.localTasks)
   const upsertLocalTask = useTaskQueueStore(s => s.upsertLocalTask)
+  const resumeTaskFromQueue = useWorkflowStore(s => s.resumeTaskFromQueue)
+  const cancelSeedanceTask = useWorkflowStore(s => s.cancelSeedanceTask)
 
   const [items, setItems] = useState<SeedanceTaskListItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<string | null>(null)
+  const [actionId, setActionId] = useState<string | null>(null)
   const itemsRef = useRef(items)
   itemsRef.current = items
 
@@ -241,9 +305,15 @@ export default function TaskQueuePanel() {
         upsertLocalTask({
           id: item.id,
           taskId: item.id,
+          prompt: item.prompt,
+          nodeTitle: item.nodeTitle,
+          workflowId: item.workflowId,
+          nodeId: item.nodeId,
           status: item.status,
+          progress: item.progress,
           videoUrl: item.content?.video_url,
           createdAt: item.created_at ? (item.created_at > 1e12 ? item.created_at : item.created_at * 1000) : Date.now(),
+          progressStartedAt: item.progressStartedAt,
         })
       }
     }
@@ -289,10 +359,15 @@ export default function TaskQueuePanel() {
           upsertLocalTask({
             id: task.id,
             taskId: task.id,
+            prompt: task.prompt ?? local?.prompt,
+            nodeTitle: task.nodeTitle ?? local?.nodeTitle,
+            workflowId: task.workflowId ?? local?.workflowId,
+            nodeId: task.nodeId ?? local?.nodeId,
             status: data.status,
             progress: fakeProgress,
             videoUrl: data.videoUrl,
             createdAt: startedAtMs,
+            progressStartedAt: startedAtMs,
           })
 
           setItems(prev => prev.map(item =>
@@ -307,6 +382,9 @@ export default function TaskQueuePanel() {
                 }
               : item,
           ))
+
+          if (data.status === 'failed')
+            notifyCreditsChanged()
         }
         catch {
           // 单次轮询失败不影响其他任务
@@ -321,6 +399,36 @@ export default function TaskQueuePanel() {
       window.clearInterval(timer)
     }
   }, [open, activeTaskIds, upsertLocalTask])
+
+  const resumeTask = async (task: SeedanceTaskListItem) => {
+    setActionId(task.id)
+    setError(null)
+    try {
+      await resumeTaskFromQueue(task)
+      closePanel()
+    }
+    catch (err) {
+      setError(err instanceof Error ? err.message : '恢复任务失败')
+    }
+    finally {
+      setActionId(null)
+    }
+  }
+
+  const cancelTask = async (task: SeedanceTaskListItem) => {
+    setActionId(task.id)
+    setError(null)
+    try {
+      await cancelSeedanceTask(task.id)
+      await fetchTasks()
+    }
+    catch (err) {
+      setError(err instanceof Error ? err.message : '取消任务失败')
+    }
+    finally {
+      setActionId(null)
+    }
+  }
 
   const saveToLocal = async (task: SeedanceTaskListItem) => {
     const sourceUrl = task.content?.video_url
@@ -423,7 +531,7 @@ export default function TaskQueuePanel() {
         {localTasks.length > 0 && (
           <div className="border-b border-border-subtle bg-surface-muted/50 px-4 py-2">
             <p className="text-[10px] text-muted">
-              本机已记录 {localTasks.length} 个任务（运行工作流时自动加入）
+              已执行 {localTasks.length} 个任务
             </p>
           </div>
         )}
@@ -457,7 +565,10 @@ export default function TaskQueuePanel() {
                         task={task}
                         local={localTasks.find(t => t.taskId === task.id)}
                         savingId={savingId}
+                        actionId={actionId}
                         onSaveToLocal={saveToLocal}
+                        onResume={resumeTask}
+                        onCancel={cancelTask}
                       />
                     ))}
                   </ul>

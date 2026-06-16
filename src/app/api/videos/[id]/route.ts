@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { authErrorResponse, requireAuth } from '@/lib/auth/context'
 import { buildVideoDownloadFilename } from '@/lib/video-download'
 import { getMimeTypeFromVideoFilename, readVideo } from '@/lib/video-storage'
 
@@ -7,6 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { workspaceId } = await requireAuth()
     const { id } = await params
     const { searchParams } = new URL(request.url)
     const download = searchParams.get('download') === '1'
@@ -15,7 +17,7 @@ export async function GET(
       ? Number(searchParams.get('createdAt'))
       : undefined
 
-    const file = await readVideo(id)
+    const file = await readVideo(id, workspaceId)
 
     if (!file) {
       return NextResponse.json({ error: '视频不存在' }, { status: 404 })
@@ -39,7 +41,6 @@ export async function GET(
     return new NextResponse(new Uint8Array(file.buffer), { headers })
   }
   catch (error) {
-    const message = error instanceof Error ? error.message : '读取失败'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return authErrorResponse(error)
   }
 }

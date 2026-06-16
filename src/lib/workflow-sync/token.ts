@@ -1,0 +1,90 @@
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export type WorkflowSyncTokenPayload = {
+  userId: string
+  userName: string
+  userImage: string | null
+  workspaceId: string
+  exp: number
+}
+
+const TOKEN_TTL_MS = 15 * 60 * 1000
+
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64url')
+}
+
+function base64UrlDecode(value: string): string {
+  return Buffer.from(value, 'base64url').toString('utf8')
+}
+
+function signPayload(payload: string, secret: string): string {
+  return createHmac('sha256', secret).update(payload).digest('base64url')
+}
+
+export function getWorkflowSyncSecret(): string {
+  const secret = process.env.AUTH_SECRET?.trim()
+  if (!secret)
+    throw new Error('AUTH_SECRET 未设置')
+  return secret
+}
+
+export function createWorkflowSyncToken(input: {
+  userId: string
+  userName: string
+  userImage: string | null
+  workspaceId: string
+}): { token: string, expiresAt: number } {
+  const secret = getWorkflowSyncSecret()
+  const expiresAt = Date.now() + TOKEN_TTL_MS
+  const payload: WorkflowSyncTokenPayload = {
+    userId: input.userId,
+    userName: input.userName,
+    userImage: input.userImage,
+    workspaceId: input.workspaceId,
+    exp: expiresAt,
+  }
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload))
+  const signature = signPayload(encodedPayload, secret)
+  return { token: `${encodedPayload}.${signature}`, expiresAt }
+}
+
+export function verifyWorkflowSyncToken(token: string): WorkflowSyncTokenPayload | null {
+  const secret = process.env.AUTH_SECRET?.trim()
+  if (!secret)
+    return null
+
+  const [encodedPayload, signature] = token.split('.')
+  if (!encodedPayload || !signature)
+    return null
+
+  const expected = signPayload(encodedPayload, secret)
+  const sigBuffer = Buffer.from(signature)
+  const expectedBuffer = Buffer.from(expected)
+  if (sigBuffer.length !== expectedBuffer.length || !timingSafeEqual(sigBuffer, expectedBuffer))
+    return null
+
+  try {
+    const payload = JSON.parse(base64UrlDecode(encodedPayload)) as WorkflowSyncTokenPayload
+    if (!payload.userId || !payload.workspaceId || !payload.exp)
+      return null
+    if (Date.now() > payload.exp)
+      return null
+    return payload
+  }
+  catch {
+    return null
+  }
+}
+
+export function getWorkflowWsUrl(): string {
+  return process.env.NEXT_PUBLIC_WORKFLOW_WS_URL?.trim() || 'ws://localhost:3001'
+}
+
+export function getWorkflowWsPort(): number {
+  const raw = process.env.WORKFLOW_WS_PORT?.trim()
+  if (!raw)
+    return 3001
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3001
+}

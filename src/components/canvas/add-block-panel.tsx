@@ -4,11 +4,20 @@ import { useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { SeedanceBrandText } from '@/components/seedance-brand-text'
 import { WORKFLOW_NODE_BLOCKS } from '@/lib/node-blocks'
-import { btnSecondaryClass, dropdownClass } from '@/lib/ui-classes'
+import { btnCompactClass, btnSecondaryClass, dropdownAnchorClass, dropdownClass } from '@/lib/ui-classes'
+import { cn } from '@/lib/cn'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
 import { useWorkflowStore } from '@/store/workflow-store'
 
-export default function AddBlockPanel() {
+type AddBlockPanelProps = {
+  compact?: boolean
+  menuPlacement?: 'above' | 'below'
+}
+
+export default function AddBlockPanel({
+  compact = false,
+  menuPlacement = 'below',
+}: AddBlockPanelProps) {
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const addNode = useWorkflowStore(s => s.addNode)
@@ -33,14 +42,14 @@ export default function AddBlockPanel() {
         type="button"
         disabled={isRunning}
         onClick={() => setOpen(v => !v)}
-        className={btnSecondaryClass}
+        className={cn(compact ? btnCompactClass : btnSecondaryClass, open && 'border-primary-light bg-primary/10 text-primary-light')}
       >
-        <Plus className="h-4 w-4" />
+        <Plus className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
         添加节点
       </button>
 
       {open && (
-        <div className={`absolute left-0 top-full z-[110] mt-2 w-72 ${dropdownClass}`}>
+        <div className={cn(dropdownAnchorClass(menuPlacement, 'left'), `w-72 ${dropdownClass}`)}>
           <div className="border-b border-border-subtle px-4 py-3">
             <p className="text-sm font-semibold text-foreground">节点库</p>
             <p className="text-xs text-muted">拖拽连接，构建 AI 视频生成流程</p>

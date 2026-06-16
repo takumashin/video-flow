@@ -11,8 +11,7 @@ export const WORKFLOW_NODE_BLOCKS: WorkflowNodeBlock[] = [
   { type: NodeType.ImageInput, label: '参考图片', desc: '拖拽或点击上传，支持首尾帧 / 全能参考' },
   { type: NodeType.VideoInput, label: '参考视频', desc: '全能参考模式最多 3 个（MP4/WebM）' },
   { type: NodeType.AudioInput, label: '参考音频', desc: '全能参考模式最多 3 个（MP3/WAV）' },
-  { type: NodeType.Seedance, label: 'Seedance 生成', desc: '调用火山引擎视频模型' },
-  { type: NodeType.Output, label: '视频输出', desc: '预览与下载生成结果' },
+  { type: NodeType.Seedance, label: 'Seedance 生成', desc: '生成视频、预览结果与查看历史' },
 ]
 
 export function getNodeBlock(type: NodeType): WorkflowNodeBlock | undefined {

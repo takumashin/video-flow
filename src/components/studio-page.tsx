@@ -5,12 +5,17 @@ import VideoHistoryModal from '@/components/canvas/video-history-modal'
 import MediaPreviewModal from '@/components/media-preview-modal'
 import RunLogPanel from '@/components/canvas/run-log-panel'
 import StudioHeader from '@/components/studio-header'
+import StudioWorkDock from '@/components/studio-work-dock'
 import TaskQueuePanel from '@/components/task-queue-panel'
+import TaskQueueBootstrap from '@/components/task-queue-bootstrap'
 import WorkflowAutoSave from '@/components/workflow-auto-save'
+import WorkflowCollaboration from '@/components/workflow-collaboration'
+import { WorkflowCollaborationBanner } from '@/components/workflow-conflict-dialog'
+import WorkflowBootstrap from '@/components/workflow-bootstrap'
 import SeedanceJobRecovery from '@/components/seedance-job-recovery'
 import WorkflowTabs from '@/components/workflow-tabs'
 
-const HEADER_HEIGHT = '3.5rem' /* h-14 */
+const HEADER_HEIGHT = '3rem' /* h-12 */
 
 export default function StudioPage() {
   return (
@@ -21,13 +26,18 @@ export default function StudioPage() {
         style={{ paddingTop: HEADER_HEIGHT }}
       >
         <WorkflowTabs />
+        <WorkflowCollaborationBanner />
         <StudioWorkspace />
+        <StudioWorkDock />
         <RunLogPanel />
       </main>
       <VideoHistoryModal />
       <MediaPreviewModal />
       <TaskQueuePanel />
       <WorkflowAutoSave />
+      <WorkflowCollaboration />
+      <WorkflowBootstrap />
+      <TaskQueueBootstrap />
       <SeedanceJobRecovery />
     </div>
   )
