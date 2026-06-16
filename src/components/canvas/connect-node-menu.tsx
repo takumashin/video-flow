@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { SeedanceBrandText } from '@/components/seedance-brand-text'
 import { cn } from '@/lib/cn'
 import { getConnectableNodeTypes, type ConnectHandleSide } from '@/lib/connect-node-options'
 import { WORKFLOW_NODE_BLOCKS } from '@/lib/node-blocks'
@@ -83,7 +84,7 @@ export default function ConnectNodeMenu({
         <div className="px-4 py-3">
           <p className="text-sm font-semibold text-foreground">暂无可连接节点</p>
           <p className="mt-1 text-xs text-muted">
-            「{anchorTitle}」在当前方向没有可新建的节点类型
+            「<SeedanceBrandText text={anchorTitle} />」在当前方向没有可新建的节点类型
           </p>
         </div>
       </div>
@@ -103,7 +104,7 @@ export default function ConnectNodeMenu({
       <div className="border-b border-border-subtle px-4 py-3">
         <p className="text-sm font-semibold text-foreground">选择要连接的节点</p>
         <p className="text-xs text-muted">
-          从「{anchorTitle}」{menu.handleType === 'source' ? '继续向右' : '补充上游输入'}
+          从「<SeedanceBrandText text={anchorTitle} />」{menu.handleType === 'source' ? '继续向右' : '补充上游输入'}
         </p>
       </div>
       <div className="max-h-80 overflow-y-auto p-2">
@@ -114,7 +115,9 @@ export default function ConnectNodeMenu({
             onClick={() => onSelect(option.type, menu)}
             className="flex w-full flex-col items-start rounded-lg px-3 py-2.5 text-left hover:bg-surface-muted"
           >
-            <span className="text-sm font-medium text-foreground">{option.label}</span>
+            <span className="text-sm font-medium text-foreground">
+              <SeedanceBrandText text={option.label} />
+            </span>
             <span className="text-xs text-muted">{option.desc}</span>
           </button>
         ))}

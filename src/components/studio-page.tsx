@@ -2,6 +2,7 @@
 
 import StudioWorkspace from '@/components/studio-workspace'
 import VideoHistoryModal from '@/components/canvas/video-history-modal'
+import MediaPreviewModal from '@/components/media-preview-modal'
 import RunLogPanel from '@/components/canvas/run-log-panel'
 import StudioHeader from '@/components/studio-header'
 import TaskQueuePanel from '@/components/task-queue-panel'
@@ -24,6 +25,7 @@ export default function StudioPage() {
         <RunLogPanel />
       </main>
       <VideoHistoryModal />
+      <MediaPreviewModal />
       <TaskQueuePanel />
       <WorkflowAutoSave />
       <SeedanceJobRecovery />

@@ -1,6 +1,6 @@
 'use client'
 
-import { Handle, Position, type NodeProps } from 'reactflow'
+import { Position, type NodeProps } from 'reactflow'
 import {
   Film,
   History,
@@ -17,6 +17,7 @@ import { useFakeSeedanceProgress } from '@/lib/use-fake-seedance-progress'
 import type { WorkflowEdge, WorkflowNode, WorkflowNodeData } from '@/lib/types'
 import { NodeType } from '@/lib/types'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
+import { SeedanceBrandText } from '@/components/seedance-brand-text'
 import { useWorkflowStore } from '@/store/workflow-store'
 import { getConnectedSeedanceModeForImageNode } from '@/lib/seedance-upstream'
 import VideoDownloadLink from '@/components/video-download-link'
@@ -24,6 +25,7 @@ import VideoGenLoadingState from '@/components/video-gen-loading-state'
 import ImageUploadZone from './image-upload-zone'
 import MediaUploadZone from './media-upload-zone'
 import NodeVideoPlayer from './node-video-player'
+import WorkflowNodeHandle from './workflow-node-handle'
 import { SeedanceNodeSummary } from './seedance-node-panel'
 import {
   FieldLabel,
@@ -138,7 +140,7 @@ function NodeBody({
     case NodeType.Start:
       return (
         <p className="text-xs leading-relaxed text-muted">
-          历史工作流入口节点。请在「Seedance 生成」节点上点击「生成视频」。
+          历史工作流入口节点。请在「<SeedanceBrandText text="Seedance 生成" />」节点上点击「生成视频」。
         </p>
       )
 
@@ -252,7 +254,7 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
     >
       <Icon className={cn('h-4 w-4 shrink-0', meta.color)} />
       <span className="min-w-0 flex-1 select-none truncate text-sm font-medium text-foreground">
-        {data.title}
+        <SeedanceBrandText text={data.title} />
       </span>
       {canDelete && (
         <button
@@ -272,11 +274,7 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
     return (
       <div className={cn('w-[300px]', cardClass)}>
         {showTarget && (
-          <Handle
-            type="target"
-            position={Position.Left}
-            className="!h-3 !w-3 !border-2 !border-surface !bg-primary-light"
-          />
+          <WorkflowNodeHandle type="target" position={Position.Left} />
         )}
 
         {header}
@@ -293,11 +291,7 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
         </div>
 
         {showSource && (
-          <Handle
-            type="source"
-            position={Position.Right}
-            className="!h-3 !w-3 !border-2 !border-surface !bg-primary-light"
-          />
+          <WorkflowNodeHandle type="source" position={Position.Right} />
         )}
       </div>
     )
@@ -309,11 +303,7 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
       cardClass,
     )}>
       {showTarget && (
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!h-3 !w-3 !border-2 !border-surface !bg-primary-light"
-        />
+        <WorkflowNodeHandle type="target" position={Position.Left} />
       )}
 
       {header}
@@ -323,11 +313,7 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
       </div>
 
       {showSource && (
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!h-3 !w-3 !border-2 !border-surface !bg-primary-light"
-        />
+        <WorkflowNodeHandle type="source" position={Position.Right} />
       )}
     </div>
   )

@@ -1,6 +1,8 @@
 'use client'
 
 import { FileAudio, FileVideo, Type, X } from 'lucide-react'
+import MediaPreviewImage from '@/components/media-preview-image'
+import { openMediaPreview } from '@/store/media-preview-store'
 import { getSeedanceModeInputRules } from '@/lib/seedance-connection-rules'
 import type { SeedanceGenerationMode } from '@/lib/types'
 import { getImageRoleLabel, shouldShowImageRoleInPreview, type SeedanceUpstreamRefs } from '@/lib/seedance-upstream'
@@ -53,11 +55,12 @@ export default function SeedanceConnectedInputs({
                 key={image.nodeId}
                 className="group relative aspect-square overflow-hidden rounded-lg border border-violet-500/30 bg-violet-500/5"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <MediaPreviewImage
                   src={image.imageUrl}
                   alt={image.title}
-                  className="h-full w-full object-cover"
+                  title={`@图片${image.index} · ${image.title}`}
+                  imageClassName="h-full w-full object-cover"
+                  showHint={false}
                 />
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1.5 pt-4">
                   <p className="truncate text-[10px] font-medium text-white">
@@ -77,7 +80,7 @@ export default function SeedanceConnectedInputs({
                     e.stopPropagation()
                     onRemoveImage(image.nodeId)
                   }}
-                  className="nodrag absolute right-1 top-1 rounded-md bg-black/60 p-1 text-white opacity-0 shadow-sm transition hover:bg-red-600 group-hover:opacity-100 disabled:opacity-50"
+                  className="nodrag absolute right-1 top-1 z-10 rounded-md bg-black/60 p-1 text-white opacity-0 shadow-sm transition hover:bg-red-600 group-hover:opacity-100 disabled:opacity-50"
                   aria-label={`移除 ${image.title}`}
                 >
                   <X className="h-3.5 w-3.5" />
@@ -102,19 +105,33 @@ export default function SeedanceConnectedInputs({
                 key={video.nodeId}
                 className="group relative aspect-square overflow-hidden rounded-lg border border-sky-500/30 bg-sky-500/5"
               >
-                <video
-                  src={video.mediaUrl}
-                  muted
-                  playsInline
-                  preload="metadata"
-                  className="h-full w-full object-cover bg-black"
-                  onPointerDown={e => e.stopPropagation()}
-                />
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="rounded-full bg-black/45 p-1.5">
-                    <FileVideo className="h-4 w-4 text-white" />
+                <button
+                  type="button"
+                  className="nodrag relative block h-full w-full"
+                  onClick={e => {
+                    e.stopPropagation()
+                    openMediaPreview({
+                      kind: 'video',
+                      url: video.mediaUrl,
+                      title: `@视频${video.index} · ${video.title}`,
+                    })
+                  }}
+                  aria-label={`预览 ${video.title}`}
+                >
+                  <video
+                    src={video.mediaUrl}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="h-full w-full object-cover bg-black"
+                    draggable={false}
+                  />
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition group-hover:bg-black/25">
+                    <div className="rounded-full bg-black/45 p-1.5">
+                      <FileVideo className="h-4 w-4 text-white" />
+                    </div>
                   </div>
-                </div>
+                </button>
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1.5 pt-4">
                   <p className="truncate text-[10px] font-medium text-white">
                     @视频{video.index}
@@ -129,7 +146,7 @@ export default function SeedanceConnectedInputs({
                     e.stopPropagation()
                     onRemoveVideo(video.nodeId)
                   }}
-                  className="nodrag absolute right-1 top-1 rounded-md bg-black/60 p-1 text-white opacity-0 shadow-sm transition hover:bg-red-600 group-hover:opacity-100 disabled:opacity-50"
+                  className="nodrag absolute right-1 top-1 z-10 rounded-md bg-black/60 p-1 text-white opacity-0 shadow-sm transition hover:bg-red-600 group-hover:opacity-100 disabled:opacity-50"
                   aria-label={`移除 ${video.title}`}
                 >
                   <X className="h-3.5 w-3.5" />

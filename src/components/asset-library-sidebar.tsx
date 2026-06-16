@@ -21,6 +21,7 @@ import {
 } from '@/lib/media-upload-shared'
 import { processImageFiles } from '@/lib/image-upload'
 import { processAudioFiles, processVideoFiles } from '@/lib/media-upload'
+import AssetDetailPanel from '@/components/asset-detail-panel'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
 import { useAssetLibraryStore } from '@/store/asset-library-store'
 import { useWorkflowStore } from '@/store/workflow-store'
@@ -69,6 +70,7 @@ export default function AssetLibrarySidebar() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const refreshKey = useAssetLibraryStore(s => s.refreshKey)
   const bumpRefresh = useAssetLibraryStore(s => s.bumpRefresh)
@@ -129,7 +131,7 @@ export default function AssetLibrarySidebar() {
     addLog({
       nodeId: 'system',
       nodeTitle: '系统',
-      message: `已从资产库添加${TAB_OPTIONS.find(t => t.kind === item.kind)?.label ?? '素材'}`,
+      message: `已将${TAB_OPTIONS.find(t => t.kind === item.kind)?.label ?? '素材'}加入工作流`,
       level: 'success',
     })
   }
@@ -177,6 +179,9 @@ export default function AssetLibrarySidebar() {
   }
 
   const filtered = uploads.filter(item => item.kind === activeTab)
+  const selectedAsset = selectedAssetId
+    ? uploads.find(item => item.id === selectedAssetId) ?? null
+    : null
 
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-border bg-surface">
@@ -184,7 +189,7 @@ export default function AssetLibrarySidebar() {
         <div className="flex items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-foreground">资产库</h2>
-            <p className="text-[10px] text-muted">拖拽或点击添加到画布</p>
+            <p className="text-[10px] text-muted">点击查看详情，拖拽加入工作流</p>
           </div>
           <div className="flex items-center gap-0.5">
             <button
@@ -215,7 +220,10 @@ export default function AssetLibrarySidebar() {
               <button
                 key={tab.kind}
                 type="button"
-                onClick={() => setActiveTab(tab.kind)}
+                onClick={() => {
+                  setActiveTab(tab.kind)
+                  setSelectedAssetId(null)
+                }}
                 className={cn(
                   'inline-flex flex-1 items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-medium transition',
                   activeTab === tab.kind
@@ -256,93 +264,109 @@ export default function AssetLibrarySidebar() {
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {loading
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {selectedAsset && selectedAsset.kind === activeTab
           ? (
-              <div className="flex items-center justify-center py-12 text-sm text-muted">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                加载中…
-              </div>
+              <AssetDetailPanel
+                item={selectedAsset}
+                kindLabel={TAB_OPTIONS.find(t => t.kind === selectedAsset.kind)?.label ?? '素材'}
+                formattedSize={formatBytes(selectedAsset.size)}
+                formattedTime={formatTime(selectedAsset.createdAt)}
+                disabled={isRunning}
+                onBack={() => setSelectedAssetId(null)}
+                onAddToWorkflow={() => addAssetToCanvas(selectedAsset)}
+              />
             )
-          : error
-            ? (
-                <p className="px-2 py-8 text-center text-xs text-red-500">{error}</p>
-              )
-            : filtered.length === 0
-              ? (
-                  <p className="px-2 py-8 text-center text-xs text-muted">
-                    暂无{TAB_OPTIONS.find(t => t.kind === activeTab)?.label}，点击上传添加
-                  </p>
-                )
-              : (
-                  <ul className="space-y-1.5">
-                    {filtered.map(item => (
-                      <li key={item.id}>
-                        <div
-                          draggable={!isRunning}
-                          onDragStart={e => {
-                            setAssetDragData(e.dataTransfer, {
-                              kind: item.kind,
-                              url: item.url,
-                              filename: item.filename,
-                            })
-                            setDraggingAssetKind(item.kind)
-                          }}
-                          onDragEnd={() => setDraggingAssetKind(null)}
-                          className={cn(
-                            'group flex w-full gap-2 rounded-lg border border-transparent p-2 transition',
-                            !isRunning && 'cursor-grab active:cursor-grabbing hover:border-border hover:bg-surface-muted',
-                            isRunning && 'opacity-50',
-                          )}
-                        >
-                          <button
-                            type="button"
-                            disabled={isRunning}
-                            onClick={() => addAssetToCanvas(item)}
-                            className="flex min-w-0 flex-1 gap-2 text-left"
-                          >
-                            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border bg-surface-muted">
-                              {item.kind === 'image'
-                                ? (
-                                    <img
-                                      src={item.url}
-                                      alt=""
-                                      className="h-full w-full object-cover"
-                                      draggable={false}
-                                    />
-                                  )
-                                : item.kind === 'video'
-                                  ? (
-                                      <video
-                                        src={item.url}
-                                        muted
-                                        playsInline
-                                        preload="metadata"
-                                        className="h-full w-full object-cover"
-                                        draggable={false}
-                                      />
-                                    )
-                                  : (
-                                      <div className="flex h-full w-full items-center justify-center">
-                                        <Music className="h-5 w-5 text-muted" />
-                                      </div>
-                                    )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-medium text-foreground group-hover:text-primary-light">
-                                {item.filename}
-                              </p>
-                              <p className="text-[10px] text-muted">
-                                {formatBytes(item.size)} · {formatTime(item.createdAt)}
-                              </p>
-                              <p className="mt-0.5 text-[10px] text-muted/80">拖拽或点击添加</p>
-                            </div>
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+          : (
+              <div className="h-full overflow-y-auto p-2">
+                {loading
+                  ? (
+                      <div className="flex items-center justify-center py-12 text-sm text-muted">
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        加载中…
+                      </div>
+                    )
+                  : error
+                    ? (
+                        <p className="px-2 py-8 text-center text-xs text-red-500">{error}</p>
+                      )
+                    : filtered.length === 0
+                      ? (
+                          <p className="px-2 py-8 text-center text-xs text-muted">
+                            暂无{TAB_OPTIONS.find(t => t.kind === activeTab)?.label}，点击上传添加
+                          </p>
+                        )
+                      : (
+                          <ul className="space-y-1.5">
+                            {filtered.map(item => (
+                              <li key={item.id}>
+                                <div
+                                  draggable={!isRunning}
+                                  onDragStart={e => {
+                                    setAssetDragData(e.dataTransfer, {
+                                      kind: item.kind,
+                                      url: item.url,
+                                      filename: item.filename,
+                                    })
+                                    setDraggingAssetKind(item.kind)
+                                  }}
+                                  onDragEnd={() => setDraggingAssetKind(null)}
+                                  className={cn(
+                                    'group flex w-full gap-2 rounded-lg border border-transparent p-2 transition',
+                                    !isRunning && 'cursor-grab active:cursor-grabbing hover:border-border hover:bg-surface-muted',
+                                    isRunning && 'opacity-50',
+                                  )}
+                                >
+                                  <button
+                                    type="button"
+                                    disabled={isRunning}
+                                    onClick={() => setSelectedAssetId(item.id)}
+                                    className="flex min-w-0 flex-1 gap-2 text-left"
+                                  >
+                                    <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border bg-surface-muted">
+                                      {item.kind === 'image'
+                                        ? (
+                                            <img
+                                              src={item.url}
+                                              alt=""
+                                              className="h-full w-full object-cover"
+                                              draggable={false}
+                                            />
+                                          )
+                                        : item.kind === 'video'
+                                          ? (
+                                              <video
+                                                src={item.url}
+                                                muted
+                                                playsInline
+                                                preload="metadata"
+                                                className="h-full w-full object-cover"
+                                                draggable={false}
+                                              />
+                                            )
+                                          : (
+                                              <div className="flex h-full w-full items-center justify-center">
+                                                <Music className="h-5 w-5 text-muted" />
+                                              </div>
+                                            )}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-xs font-medium text-foreground group-hover:text-primary-light">
+                                        {item.filename}
+                                      </p>
+                                      <p className="text-[10px] text-muted">
+                                        {formatBytes(item.size)} · {formatTime(item.createdAt)}
+                                      </p>
+                                      <p className="mt-0.5 text-[10px] text-muted/80">点击查看详情</p>
+                                    </div>
+                                  </button>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+              </div>
+            )}
       </div>
     </aside>
   )

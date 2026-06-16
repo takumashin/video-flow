@@ -1,6 +1,7 @@
 'use client'
 
 import { Sparkles } from 'lucide-react'
+import { SeedanceBrandText } from '@/components/seedance-brand-text'
 import type { SeedanceNodeData } from '@/lib/types'
 import { NodeType } from '@/lib/types'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
@@ -29,7 +30,9 @@ export default function SeedanceConfigSidebar() {
           <Sparkles className="h-4 w-4 text-orange-500" />
           <div>
             <h2 className="text-sm font-semibold text-foreground">生成配置</h2>
-            <p className="text-[10px] text-muted">{selectedNode.data.title || 'Seedance 生成'}</p>
+            <p className="text-[10px] text-muted">
+              <SeedanceBrandText text={selectedNode.data.title || 'Seedance 生成'} />
+            </p>
           </div>
         </div>
       </div>

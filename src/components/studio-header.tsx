@@ -1,6 +1,7 @@
 'use client'
 
 import { Sparkles, ListOrdered } from 'lucide-react'
+import { SeedanceBrandText } from '@/components/seedance-brand-text'
 import AddBlockPanel from '@/components/canvas/add-block-panel'
 import AccountBalance from '@/components/account-balance'
 import ThemeToggle from '@/components/theme-toggle'
@@ -17,7 +18,9 @@ export default function StudioHeader() {
           <Sparkles className="h-4 w-4 text-white" />
         </div>
         <div>
-          <h1 className="text-sm font-semibold text-foreground">Seedance Studio</h1>
+          <h1 className="text-sm font-semibold text-foreground">
+            <SeedanceBrandText text="Seedance Studio" />
+          </h1>
           <p className="text-xs text-muted">AI 视频生成工作流 · 火山引擎</p>
         </div>
       </div>

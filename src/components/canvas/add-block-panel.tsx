@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
+import { SeedanceBrandText } from '@/components/seedance-brand-text'
 import { WORKFLOW_NODE_BLOCKS } from '@/lib/node-blocks'
 import { btnSecondaryClass, dropdownClass } from '@/lib/ui-classes'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
@@ -55,7 +56,9 @@ export default function AddBlockPanel() {
                 }}
                 className="flex w-full flex-col items-start rounded-lg px-3 py-2.5 text-left hover:bg-surface-muted"
               >
-                <span className="text-sm font-medium text-foreground">{block.label}</span>
+                <span className="text-sm font-medium text-foreground">
+                  <SeedanceBrandText text={block.label} />
+                </span>
                 <span className="text-xs text-muted">{block.desc}</span>
               </button>
             ))}

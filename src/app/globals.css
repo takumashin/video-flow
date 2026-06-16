@@ -129,6 +129,55 @@ body {
   stroke-linecap: round;
 }
 
+#workflow-container .react-flow__handle.workflow-node-handle {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--surface);
+  background: var(--primary-light);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--primary-light) 35%, transparent),
+    0 1px 2px color-mix(in srgb, var(--foreground) 12%, transparent);
+  z-index: 3;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+#workflow-container .react-flow__handle.workflow-node-handle::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: 9999px;
+}
+
+#workflow-container .react-flow__handle-left.workflow-node-handle {
+  left: -7px;
+}
+
+#workflow-container .react-flow__handle-right.workflow-node-handle {
+  right: -7px;
+}
+
+#workflow-container .react-flow__handle.workflow-node-handle:hover,
+#workflow-container .react-flow__handle.workflow-node-handle.connectingfrom,
+#workflow-container .react-flow__handle.workflow-node-handle.connectingto,
+#workflow-container .react-flow__handle.workflow-node-handle.valid {
+  transform: translate(-50%, -50%) scale(1.18);
+  background: var(--primary);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--primary-light) 28%, transparent),
+    0 0 12px color-mix(in srgb, var(--primary-light) 45%, transparent);
+}
+
+#workflow-container .react-flow__node.selected {
+  z-index: 2;
+}
+
+#workflow-container .react-flow__node.selected .workflow-node-handle {
+  z-index: 4;
+}
+
 #workflow-container .workflow-edge-hitarea {
   pointer-events: stroke;
   cursor: pointer;

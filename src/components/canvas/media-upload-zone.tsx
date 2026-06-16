@@ -10,6 +10,8 @@ import {
   VIDEO_ACCEPT,
 } from '@/lib/media-upload-shared'
 import { processMediaFile } from '@/lib/media-upload'
+import NodeAudioPlayer from './node-audio-player'
+import NodeVideoPlayer from './node-video-player'
 import { NodeTextInput } from './node-fields'
 
 type MediaKind = 'video' | 'audio'
@@ -146,23 +148,22 @@ export default function MediaUploadZone({ kind, value, onChange, disabled }: Med
       {value
         ? (
             <div className="space-y-2">
-              <div className="overflow-hidden rounded-md border border-border bg-surface-muted">
-                {kind === 'video'
-                  ? (
-                      <video
-                        src={value}
-                        controls
-                        playsInline
-                        className="h-28 w-full bg-black object-cover"
-                      />
-                    )
-                  : (
-                      <div className="flex flex-col items-center gap-2 px-3 py-4">
-                        <FileAudio className="h-8 w-8 text-sky-500" />
-                        <audio src={value} controls className="w-full" />
-                      </div>
-                    )}
-              </div>
+              {kind === 'video'
+                ? (
+                    <NodeVideoPlayer
+                      src={value}
+                      previewTitle={config.previewLabel}
+                      showScreenshot={false}
+                      className="!min-h-[140px]"
+                    />
+                  )
+                : (
+                    <NodeAudioPlayer
+                      src={value}
+                      previewTitle={config.previewLabel}
+                      className="!min-h-[120px]"
+                    />
+                  )}
               <div className="flex gap-2">
                 <button
                   type="button"

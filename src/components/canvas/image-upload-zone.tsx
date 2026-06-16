@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import { ImagePlus, Link2, Loader2, Upload } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { IMAGE_ACCEPT, processImageFile } from '@/lib/image-upload'
+import MediaPreviewImage from '@/components/media-preview-image'
 import { NodeTextInput } from './node-fields'
 
 type ImageUploadZoneProps = {
@@ -102,12 +103,12 @@ export default function ImageUploadZone({ value, onChange, disabled }: ImageUplo
       {value
         ? (
             <div className="space-y-2">
-              <div className="rounded-md border border-border bg-surface-muted p-1">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+              <div className="overflow-hidden rounded-md border border-border bg-surface-muted p-1">
+                <MediaPreviewImage
                   src={value}
                   alt="参考图预览"
-                  className="mx-auto block max-h-72 w-full object-contain"
+                  title="参考图预览"
+                  imageClassName="mx-auto block max-h-72 w-full object-contain"
                 />
               </div>
               <div className="flex gap-2">

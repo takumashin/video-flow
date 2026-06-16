@@ -430,6 +430,8 @@ function WorkflowCanvasInner() {
         onConnectEnd={handleConnectEnd}
         isValidConnection={isValidConnection}
         nodesConnectable={!isRunning}
+        connectionRadius={40}
+        elevateNodesOnSelect
         onPaneClick={onPaneClick}
         onNodeClick={onNodeClick}
         onDragOver={onDragOver}

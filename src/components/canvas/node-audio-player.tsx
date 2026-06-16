@@ -1,29 +1,25 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Camera, Pause, Play, Volume2, VolumeX } from 'lucide-react'
+import { Music, Pause, Play, Volume2, VolumeX } from 'lucide-react'
 import { MediaPreviewExpandButton } from '@/components/media-preview-modal'
 import { formatMediaTime } from '@/lib/format-media-time'
 import { cn } from '@/lib/cn'
 
-type NodeVideoPlayerProps = {
+type NodeAudioPlayerProps = {
   src: string
-  poster?: string
-  className?: string
   previewTitle?: string
-  showScreenshot?: boolean
+  className?: string
   showExpand?: boolean
 }
 
-export default function NodeVideoPlayer({
+export default function NodeAudioPlayer({
   src,
-  poster,
+  previewTitle = '音频预览',
   className,
-  previewTitle = '视频预览',
-  showScreenshot = true,
   showExpand = true,
-}: NodeVideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null)
+}: NodeAudioPlayerProps) {
+  const audioRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -34,58 +30,58 @@ export default function NodeVideoPlayer({
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0
 
   useEffect(() => {
-    const video = videoRef.current
-    if (!video)
+    const audio = audioRef.current
+    if (!audio)
       return
 
-    const onTimeUpdate = () => setCurrentTime(video.currentTime)
-    const onLoadedMetadata = () => setDuration(video.duration)
-    const onDurationChange = () => setDuration(video.duration)
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime)
+    const onLoadedMetadata = () => setDuration(audio.duration)
+    const onDurationChange = () => setDuration(audio.duration)
     const onPlay = () => setPlaying(true)
     const onPause = () => setPlaying(false)
     const onEnded = () => setPlaying(false)
 
-    video.addEventListener('timeupdate', onTimeUpdate)
-    video.addEventListener('loadedmetadata', onLoadedMetadata)
-    video.addEventListener('durationchange', onDurationChange)
-    video.addEventListener('play', onPlay)
-    video.addEventListener('pause', onPause)
-    video.addEventListener('ended', onEnded)
+    audio.addEventListener('timeupdate', onTimeUpdate)
+    audio.addEventListener('loadedmetadata', onLoadedMetadata)
+    audio.addEventListener('durationchange', onDurationChange)
+    audio.addEventListener('play', onPlay)
+    audio.addEventListener('pause', onPause)
+    audio.addEventListener('ended', onEnded)
 
     return () => {
-      video.removeEventListener('timeupdate', onTimeUpdate)
-      video.removeEventListener('loadedmetadata', onLoadedMetadata)
-      video.removeEventListener('durationchange', onDurationChange)
-      video.removeEventListener('play', onPlay)
-      video.removeEventListener('pause', onPause)
-      video.removeEventListener('ended', onEnded)
+      audio.removeEventListener('timeupdate', onTimeUpdate)
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata)
+      audio.removeEventListener('durationchange', onDurationChange)
+      audio.removeEventListener('play', onPlay)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('ended', onEnded)
     }
   }, [src])
 
   useEffect(() => {
-    const video = videoRef.current
-    if (!video)
+    const audio = audioRef.current
+    if (!audio)
       return
-    video.volume = volume
-    video.muted = muted
+    audio.volume = volume
+    audio.muted = muted
   }, [volume, muted])
 
   const togglePlay = useCallback(() => {
-    const video = videoRef.current
-    if (!video)
+    const audio = audioRef.current
+    if (!audio)
       return
-    if (video.paused)
-      video.play()
+    if (audio.paused)
+      audio.play()
     else
-      video.pause()
+      audio.pause()
   }, [])
 
   const seek = useCallback((ratio: number) => {
-    const video = videoRef.current
-    if (!video || !Number.isFinite(duration) || duration <= 0)
+    const audio = audioRef.current
+    if (!audio || !Number.isFinite(duration) || duration <= 0)
       return
     const next = Math.min(duration, Math.max(0, ratio * duration))
-    video.currentTime = next
+    audio.currentTime = next
     setCurrentTime(next)
   }, [duration])
 
@@ -95,53 +91,32 @@ export default function NodeVideoPlayer({
     seek((e.clientX - rect.left) / rect.width)
   }
 
-  const toggleMute = () => {
-    setMuted(v => !v)
-  }
-
-  const captureScreenshot = () => {
-    const video = videoRef.current
-    if (!video || video.videoWidth === 0)
-      return
-
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const ctx = canvas.getContext('2d')
-    if (!ctx)
-      return
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const dataUrl = canvas.toDataURL('image/png')
-    const anchor = document.createElement('a')
-    anchor.href = dataUrl
-    anchor.download = `screenshot-${Date.now()}.png`
-    anchor.click()
-  }
-
   return (
     <div
       className={cn(
-        'node-inner relative aspect-video min-h-[180px] overflow-hidden rounded-md bg-black',
+        'node-inner relative min-h-[120px] overflow-hidden rounded-md bg-gradient-to-br from-emerald-950 via-zinc-900 to-zinc-950',
         className,
       )}
       onPointerDown={e => e.stopPropagation()}
       onClick={e => e.stopPropagation()}
     >
-      <video
-        ref={videoRef}
-        key={src}
-        src={src}
-        poster={poster}
-        playsInline
-        preload="none"
-        className="node-media absolute inset-0 h-full w-full bg-black object-contain"
-        onClick={togglePlay}
-      />
+      <audio ref={audioRef} key={src} src={src} preload="metadata" className="hidden" />
+
+      <div className="flex min-h-[72px] items-center justify-center px-4 pt-3">
+        <div
+          className={cn(
+            'flex h-14 w-14 items-center justify-center rounded-full bg-black/40 ring-1 ring-white/10 transition',
+            playing && 'scale-105 ring-emerald-400/40',
+          )}
+        >
+          <Music className={cn('h-6 w-6 text-emerald-400', playing && 'animate-pulse')} />
+        </div>
+      </div>
 
       {!playing && (
         <button
           type="button"
-          className="nodrag absolute inset-0 flex items-center justify-center bg-black/25 transition hover:bg-black/35"
+          className="nodrag absolute inset-0 flex items-center justify-center bg-black/10 transition hover:bg-black/20"
           onClick={e => {
             e.stopPropagation()
             togglePlay()
@@ -184,10 +159,14 @@ export default function NodeVideoPlayer({
             aria-valuenow={currentTime}
           >
             <div
-              className="absolute inset-y-0 left-0 rounded-full bg-primary-light"
+              className="absolute inset-y-0 left-0 rounded-full bg-emerald-400"
               style={{ width: `${progress}%` }}
             />
           </div>
+
+          <span className="shrink-0 text-[10px] tabular-nums text-white/60">
+            {formatMediaTime(duration)}
+          </span>
 
           <div
             className="relative flex items-center"
@@ -208,7 +187,7 @@ export default function NodeVideoPlayer({
                     if (v > 0)
                       setMuted(false)
                   }}
-                  className="nodrag h-1 w-16 cursor-pointer accent-primary-light"
+                  className="nodrag h-1 w-16 cursor-pointer accent-emerald-400"
                   aria-label="音量"
                 />
               </div>
@@ -216,7 +195,7 @@ export default function NodeVideoPlayer({
             <button
               type="button"
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
-              onClick={toggleMute}
+              onClick={() => setMuted(v => !v)}
               aria-label={muted ? '取消静音' : '静音'}
             >
               {muted || volume === 0
@@ -227,23 +206,11 @@ export default function NodeVideoPlayer({
 
           {showExpand && (
             <MediaPreviewExpandButton
-              kind="video"
+              kind="audio"
               url={src}
               title={previewTitle}
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
             />
-          )}
-
-          {showScreenshot && (
-            <button
-              type="button"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
-              onClick={captureScreenshot}
-              title="截图"
-              aria-label="截图"
-            >
-              <Camera className="h-2.5 w-2.5" />
-            </button>
           )}
         </div>
       </div>
