@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { AuthPageLoading, AuthPageShell } from '@/components/auth-page-shell'
 import { SiteLogo } from '@/components/site-logo'
 
 function VerifyEmailContent() {
@@ -35,8 +36,8 @@ function VerifyEmailContent() {
   }, [token, uid])
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 text-center shadow-xl">
+    <AuthPageShell>
+      <div className="text-center">
         <SiteLogo size={48} className="mx-auto mb-4 h-12 w-12 rounded-xl" />
         {status === 'loading' && (
           <div className="flex items-center justify-center gap-2 text-muted">
@@ -52,13 +53,13 @@ function VerifyEmailContent() {
           <Link href="/" className="text-primary hover:underline">返回 Studio</Link>
         </div>
       </div>
-    </div>
+    </AuthPageShell>
   )
 }
 
 export default function VerifyEmailPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-full items-center justify-center text-muted">加载中…</div>}>
+    <Suspense fallback={<AuthPageLoading />}>
       <VerifyEmailContent />
     </Suspense>
   )

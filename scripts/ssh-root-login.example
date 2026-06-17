@@ -1,0 +1,15 @@
+# Copy to ~/.ssh/config and replace YOUR_SERVER_IP / PORT as needed.
+#
+#   cp scripts/ssh-root-login.example ~/.ssh/config
+#   chmod 600 ~/.ssh/config
+
+Host myserver
+    HostName YOUR_SERVER_IP
+    User root
+    Port 22
+    # Password login (no key required):
+    PreferredAuthentications password
+    PubkeyAuthentication no
+    # Or use your local key instead:
+    # IdentityFile ~/.ssh/id_ed25519
+    # PreferredAuthentications publickey,password

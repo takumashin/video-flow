@@ -29,7 +29,7 @@ cp .env.example .env.local
 
 ```env
 ARK_API_KEY=your_ark_api_key
-ARK_MODEL=doubao-seedance-1-5-pro-251215
+ARK_MODEL=doubao-seedance-2-0-mini-260615
 ```
 
 > 在 [火山方舟控制台](https://console.volcengine.com/ark) 创建推理接入点，开通 Seedance 视频生成模型。

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { AuthPageLoading, AuthPageShell } from '@/components/auth-page-shell'
 import { SiteLogo } from '@/components/site-logo'
 
 function ResetPasswordForm() {
@@ -45,15 +46,14 @@ function ResetPasswordForm() {
 
   if (!email || !token) {
     return (
-      <div className="flex min-h-full items-center justify-center p-6 text-muted">
-        链接无效，请重新申请重置密码。
-      </div>
+      <AuthPageShell>
+        <p className="py-6 text-center text-sm text-muted">链接无效，请重新申请重置密码。</p>
+      </AuthPageShell>
     )
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 shadow-xl">
+    <AuthPageShell>
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <SiteLogo size={48} className="h-12 w-12 rounded-xl" />
           <h1 className="text-xl font-semibold text-foreground">设置新密码</h1>
@@ -89,14 +89,13 @@ function ResetPasswordForm() {
         <p className="mt-6 text-center text-sm text-muted">
           <Link href="/login" className="text-primary hover:underline">返回登录</Link>
         </p>
-      </div>
-    </div>
+    </AuthPageShell>
   )
 }
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-full items-center justify-center text-muted">加载中…</div>}>
+    <Suspense fallback={<AuthPageLoading />}>
       <ResetPasswordForm />
     </Suspense>
   )

@@ -7,6 +7,7 @@ import { signIn } from 'next-auth/react'
 import { Loader2 } from 'lucide-react'
 import { SeedanceBrandText } from '@/components/seedance-brand-text'
 import { OAuthLoginButtons } from '@/components/oauth-login-buttons'
+import { AuthPageLoading, AuthPageShell } from '@/components/auth-page-shell'
 import { SiteLogo } from '@/components/site-logo'
 
 function LoginForm() {
@@ -47,8 +48,7 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 shadow-xl">
+    <AuthPageShell>
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <SiteLogo size={48} className="h-12 w-12 rounded-xl" />
           <h1 className="text-xl font-semibold text-foreground">
@@ -118,14 +118,13 @@ function LoginForm() {
           {' '}
           · 飞书用户请直接点击上方飞书登录
         </p>
-      </div>
-    </div>
+    </AuthPageShell>
   )
 }
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-full items-center justify-center text-muted">加载中…</div>}>
+    <Suspense fallback={<AuthPageLoading />}>
       <LoginForm />
     </Suspense>
   )

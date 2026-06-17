@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import AuthSessionProvider from '@/components/auth-session-provider'
 import ThemeProvider from '@/components/theme-provider'
+import Toaster from '@/components/toaster'
 import { SITE_LOGO_SRC } from '@/lib/site-logo'
 import './globals.css'
 
@@ -55,6 +56,7 @@ export default function RootLayout({
       <body className="h-full overflow-hidden bg-background text-foreground">
         <AuthSessionProvider>
           <ThemeProvider>{children}</ThemeProvider>
+          <Toaster />
         </AuthSessionProvider>
       </body>
     </html>

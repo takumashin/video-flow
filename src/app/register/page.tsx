@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { signIn } from 'next-auth/react'
 import { Loader2 } from 'lucide-react'
 import { SeedanceBrandText } from '@/components/seedance-brand-text'
+import { AuthPageLoading, AuthPageShell } from '@/components/auth-page-shell'
 import { SiteLogo } from '@/components/site-logo'
 
 export default function RegisterPage() {
@@ -69,8 +70,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 shadow-xl">
+    <AuthPageShell>
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <SiteLogo size={48} className="h-12 w-12 rounded-xl" />
           <h1 className="text-xl font-semibold text-foreground">创建账号</h1>
@@ -166,7 +166,6 @@ export default function RegisterPage() {
             去登录
           </Link>
         </p>
-      </div>
-    </div>
+    </AuthPageShell>
   )
 }
