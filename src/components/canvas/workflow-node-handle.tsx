@@ -7,16 +7,18 @@ import { cn } from '@/lib/cn'
 const HANDLE_SIZE = 18
 const HANDLE_CENTER_Y = 22
 
-type WorkflowNodeHandleProps = Pick<HandleProps, 'type' | 'position' | 'id'>
+type WorkflowNodeHandleProps = Pick<HandleProps, 'type' | 'position' | 'id'> & {
+  centerY?: number
+}
 
-export default function WorkflowNodeHandle({ type, position, id }: WorkflowNodeHandleProps) {
+export default function WorkflowNodeHandle({ type, position, id, centerY = HANDLE_CENTER_Y }: WorkflowNodeHandleProps) {
   return (
     <Handle
       id={id}
       type={type}
       position={position}
       style={{
-        top: HANDLE_CENTER_Y - HANDLE_SIZE / 2,
+        top: centerY - HANDLE_SIZE / 2,
         width: HANDLE_SIZE,
         height: HANDLE_SIZE,
       }}

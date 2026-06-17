@@ -4,6 +4,7 @@ import { memo } from 'react'
 import { MiniMap, Panel, useReactFlow } from 'reactflow'
 import { Maximize2, Minus, Plus } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { CANVAS_FIT_VIEW_OPTIONS } from '@/lib/canvas-viewport'
 import { useThemeStore } from '@/store/theme-store'
 
 function ZoomInOut() {
@@ -21,7 +22,7 @@ function ZoomInOut() {
       </button>
       <button
         type="button"
-        onClick={() => fitView({ duration: 300, padding: 0.2 })}
+        onClick={() => fitView({ duration: 300, ...CANVAS_FIT_VIEW_OPTIONS })}
         className="rounded-md p-1.5 text-secondary hover:bg-surface-muted"
         aria-label="适应画布"
       >

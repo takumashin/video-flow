@@ -33,9 +33,10 @@ import {
 } from '@/lib/media-upload-shared'
 import { hasAssetDrag, readAssetDragData } from '@/lib/asset-drag'
 import { validateSeedanceConnection, type ConnectionEndpoints } from '@/lib/seedance-connection-rules'
-import { getConnectableNodeTypes } from '@/lib/connect-node-options'
+import { getConnectableNodeTypes, shouldShowConnectNodeMenu } from '@/lib/connect-node-options'
 import { snapNodePosition, type SnapGuide } from '@/lib/node-snap'
 import { useAssetLibraryStore } from '@/store/asset-library-store'
+import { CANVAS_DEFAULT_VIEWPORT } from '@/lib/canvas-viewport'
 
 const nodeTypes = { custom: CustomNode }
 const edgeTypes = { custom: CustomEdge }
@@ -124,6 +125,7 @@ function WorkflowCanvasInner() {
     handleType: ConnectHandleSide
   } | null>(null)
   const connectSucceededRef = useRef(false)
+  const suppressPaneClickRef = useRef(false)
 
   const closeConnectMenu = useCallback(() => {
     setConnectMenu(null)
@@ -154,7 +156,7 @@ function WorkflowCanvasInner() {
 
     connectContextRef.current = {
       nodeId: params.nodeId,
-      handleType: params.handleType,
+      handleType: params.handleType as ConnectHandleSide,
     }
   }, [])
 
@@ -196,16 +198,27 @@ function WorkflowCanvasInner() {
       edges,
     )
 
-    if (connectableTypes.length === 1) {
-      addConnectedNode(
-        connectableTypes[0]!,
-        resolveConnectNodePosition(menuState, connectableTypes[0]!),
-        { nodeId: context.nodeId, handleType: context.handleType },
-      )
+    if (connectableTypes.length === 0)
+      return
+
+    if (shouldShowConnectNodeMenu(
+      { nodeId: context.nodeId, handleType: context.handleType },
+      nodes,
+      connectableTypes,
+    )) {
+      setConnectMenu(menuState)
+      suppressPaneClickRef.current = true
+      window.setTimeout(() => {
+        suppressPaneClickRef.current = false
+      }, 200)
       return
     }
 
-    setConnectMenu(menuState)
+    addConnectedNode(
+      connectableTypes[0]!,
+      resolveConnectNodePosition(menuState, connectableTypes[0]!),
+      { nodeId: context.nodeId, handleType: context.handleType },
+    )
   }, [addConnectedNode, edges, nodes, screenToFlowPosition])
 
   const handleConnectNodeSelect = useCallback((
@@ -271,9 +284,11 @@ function WorkflowCanvasInner() {
   )
 
   const onPaneClick = useCallback(() => {
-    closeCanvasMenus()
+    if (suppressPaneClickRef.current)
+      return
+    closeAddNodeMenu()
     selectNode(null)
-  }, [closeCanvasMenus, selectNode])
+  }, [closeAddNodeMenu, selectNode])
 
   const onPaneContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault()
@@ -461,6 +476,7 @@ function WorkflowCanvasInner() {
         onConnect={handleConnect}
         onConnectStart={handleConnectStart}
         onConnectEnd={handleConnectEnd}
+        connectionMode="loose"
         isValidConnection={isValidConnection}
         connectionRadius={64}
         elevateNodesOnSelect
@@ -472,8 +488,7 @@ function WorkflowCanvasInner() {
         onDrop={onDrop}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.2 }}
+        defaultViewport={CANVAS_DEFAULT_VIEWPORT}
         minZoom={0.2}
         maxZoom={2}
         deleteKeyCode={['Backspace', 'Delete']}

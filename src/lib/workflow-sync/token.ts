@@ -77,14 +77,47 @@ export function verifyWorkflowSyncToken(token: string): WorkflowSyncTokenPayload
   }
 }
 
-export function getWorkflowWsUrl(): string {
-  return process.env.NEXT_PUBLIC_WORKFLOW_WS_URL?.trim() || 'ws://localhost:3001'
-}
-
 export function getWorkflowWsPort(): number {
   const raw = process.env.WORKFLOW_WS_PORT?.trim()
   if (!raw)
     return 3001
   const parsed = Number.parseInt(raw, 10)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 3001
+}
+
+function wsProtocolForHttpProtocol(protocol: string): 'ws' | 'wss' {
+  return protocol === 'https:' ? 'wss' : 'ws'
+}
+
+/** 解析协作 WebSocket 地址：优先 env，其次 AUTH_URL / 请求 Host，最后 localhost */
+export function resolveWorkflowWsUrl(requestHost?: string | null): string {
+  const configured = process.env.NEXT_PUBLIC_WORKFLOW_WS_URL?.trim()
+  if (configured)
+    return configured
+
+  const port = getWorkflowWsPort()
+  const authUrl = process.env.AUTH_URL?.trim() || process.env.NEXTAUTH_URL?.trim()
+  if (authUrl) {
+    try {
+      const url = new URL(authUrl)
+      const wsProtocol = wsProtocolForHttpProtocol(url.protocol)
+      return `${wsProtocol}://${url.hostname}:${port}`
+    }
+    catch {
+      // fall through
+    }
+  }
+
+  const host = requestHost?.trim()
+  if (host) {
+    const hostname = host.split(':')[0]
+    if (hostname)
+      return `ws://${hostname}:${port}`
+  }
+
+  return `ws://localhost:${port}`
+}
+
+export function getWorkflowWsUrl(): string {
+  return resolveWorkflowWsUrl()
 }

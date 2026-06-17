@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { authErrorResponse, requireAuth } from '@/lib/auth/context'
-import { createWorkflowSyncToken, getWorkflowWsUrl } from '@/lib/workflow-sync/token'
+import { createWorkflowSyncToken, resolveWorkflowWsUrl } from '@/lib/workflow-sync/token'
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { userId, workspaceId, user } = await requireAuth()
     const { token, expiresAt } = createWorkflowSyncToken({
@@ -14,7 +14,7 @@ export async function GET() {
 
     return NextResponse.json({
       token,
-      wsUrl: getWorkflowWsUrl(),
+      wsUrl: resolveWorkflowWsUrl(request.headers.get('host')),
       expiresAt,
       user: {
         id: userId,

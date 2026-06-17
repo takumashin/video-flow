@@ -3,7 +3,12 @@
 import { useEffect, useRef } from 'react'
 import { SeedanceBrandText } from '@/components/seedance-brand-text'
 import { cn } from '@/lib/cn'
-import { getConnectableNodeTypes, type ConnectHandleSide } from '@/lib/connect-node-options'
+import {
+  getConnectableNodeTypes,
+  isSeedanceUpstreamConnectContext,
+  SEEDANCE_UPSTREAM_NODE_ORDER,
+  type ConnectHandleSide,
+} from '@/lib/connect-node-options'
 import { WORKFLOW_NODE_BLOCKS } from '@/lib/node-blocks'
 import { dropdownClass } from '@/lib/ui-classes'
 import type { WorkflowEdge, WorkflowNode } from '@/lib/types'
@@ -48,9 +53,12 @@ export default function ConnectNodeMenu({
         onClose()
     }
 
-    document.addEventListener('pointerdown', onPointerDown)
+    const attachTimer = window.setTimeout(() => {
+      document.addEventListener('pointerdown', onPointerDown)
+    }, 0)
     document.addEventListener('keydown', onKeyDown)
     return () => {
+      window.clearTimeout(attachTimer)
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
@@ -65,7 +73,19 @@ export default function ConnectNodeMenu({
     edges,
   )
 
-  const options = WORKFLOW_NODE_BLOCKS.filter(block => connectableTypes.includes(block.type))
+  const isSeedanceInputMenu = isSeedanceUpstreamConnectContext(
+    { nodeId: menu.anchorNodeId, handleType: menu.handleType },
+    nodes,
+  )
+
+  const options = (isSeedanceInputMenu
+    ? SEEDANCE_UPSTREAM_NODE_ORDER
+    : WORKFLOW_NODE_BLOCKS.map(block => block.type)
+  )
+    .map(type => WORKFLOW_NODE_BLOCKS.find(block => block.type === type))
+    .filter((block): block is typeof WORKFLOW_NODE_BLOCKS[number] =>
+      !!block && connectableTypes.includes(block.type),
+    )
 
   const anchorNode = nodes.find(node => node.id === menu.anchorNodeId)
   const anchorTitle = anchorNode?.data.title ?? '节点'
@@ -102,9 +122,13 @@ export default function ConnectNodeMenu({
       }}
     >
       <div className="border-b border-border-subtle px-4 py-3">
-        <p className="text-sm font-semibold text-foreground">选择要连接的节点</p>
+        <p className="text-sm font-semibold text-foreground">
+          {isSeedanceInputMenu ? '选择参考输入类型' : '选择要连接的节点'}
+        </p>
         <p className="text-xs text-muted">
-          从「<SeedanceBrandText text={anchorTitle} />」{menu.handleType === 'source' ? '继续向右' : '补充上游输入'}
+          {isSeedanceInputMenu
+            ? <>为「<SeedanceBrandText text={anchorTitle} />」添加参考图片、视频或音频</>
+            : <>从「<SeedanceBrandText text={anchorTitle} />」{menu.handleType === 'source' ? '继续向右' : '补充上游输入'}</>}
         </p>
       </div>
       <div className="max-h-80 overflow-y-auto p-2">

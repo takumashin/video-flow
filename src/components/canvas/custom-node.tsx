@@ -151,6 +151,9 @@ export default function CustomNode({ id, data, selected }: NodeProps<WorkflowNod
   const meta = nodeMeta[data.type as Exclude<NodeType, NodeType.Output>]
   const Icon = meta?.icon ?? Play
   const showTarget = data.type !== NodeType.Start
+    && data.type !== NodeType.ImageInput
+    && data.type !== NodeType.VideoInput
+    && data.type !== NodeType.AudioInput
   const showSource = data.type !== NodeType.Seedance && data.type !== NodeType.Output
   const canDelete = data.type !== NodeType.Start
   const nodeDisabled = data.type === NodeType.Seedance && data.status === 'running'

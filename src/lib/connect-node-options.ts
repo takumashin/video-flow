@@ -15,6 +15,34 @@ export type ConnectMenuContext = {
   handleType: ConnectHandleSide
 }
 
+/** Seedance 上游菜单展示顺序（参考素材优先） */
+export const SEEDANCE_UPSTREAM_NODE_ORDER: NodeType[] = [
+  NodeType.ImageInput,
+  NodeType.VideoInput,
+  NodeType.AudioInput,
+  NodeType.TextPrompt,
+]
+
+export function isSeedanceUpstreamConnectContext(
+  context: ConnectMenuContext,
+  nodes: WorkflowNode[],
+): boolean {
+  const node = nodes.find(item => item.id === context.nodeId)
+  return node?.data.type === NodeType.Seedance && context.handleType === 'target'
+}
+
+export function shouldShowConnectNodeMenu(
+  context: ConnectMenuContext,
+  nodes: WorkflowNode[],
+  connectableTypes: NodeType[],
+): boolean {
+  if (connectableTypes.length === 0)
+    return false
+  if (connectableTypes.length > 1)
+    return true
+  return isSeedanceUpstreamConnectContext(context, nodes)
+}
+
 function canConnectUpstreamType(
   seedanceNode: WorkflowNode,
   upstreamType: NodeType,
@@ -74,21 +102,9 @@ function getSeedanceUpstreamOptions(
   if (!seedanceNode || seedanceNode.data.type !== NodeType.Seedance)
     return []
 
-  const options: NodeType[] = []
-
-  if (canConnectUpstreamType(seedanceNode, NodeType.TextPrompt, nodes, edges))
-    options.push(NodeType.TextPrompt)
-
-  if (canConnectUpstreamType(seedanceNode, NodeType.ImageInput, nodes, edges))
-    options.push(NodeType.ImageInput)
-
-  if (canConnectUpstreamType(seedanceNode, NodeType.VideoInput, nodes, edges))
-    options.push(NodeType.VideoInput)
-
-  if (canConnectUpstreamType(seedanceNode, NodeType.AudioInput, nodes, edges))
-    options.push(NodeType.AudioInput)
-
-  return options
+  return SEEDANCE_UPSTREAM_NODE_ORDER.filter(type =>
+    canConnectUpstreamType(seedanceNode, type, nodes, edges),
+  )
 }
 
 /** 拖线新建 Seedance 时，根据锚点节点推断默认生成模式 */
