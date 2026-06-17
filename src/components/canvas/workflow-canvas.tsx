@@ -38,6 +38,7 @@ import { getConnectableNodeTypes, shouldShowConnectNodeMenu } from '@/lib/connec
 import { snapNodePosition, type SnapGuide } from '@/lib/node-snap'
 import { useAssetLibraryStore } from '@/store/asset-library-store'
 import { CANVAS_DEFAULT_VIEWPORT } from '@/lib/canvas-viewport'
+import { toast } from '@/lib/toast-store'
 
 const nodeTypes = { custom: CustomNode }
 const edgeTypes = { custom: CustomEdge }
@@ -434,6 +435,7 @@ function WorkflowCanvasInner() {
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '文件上传失败'
+      toast.error(message)
       addLog({
         nodeId: 'system',
         nodeTitle: '系统',

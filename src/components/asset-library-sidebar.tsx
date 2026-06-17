@@ -29,6 +29,7 @@ import AssetDetailPanel from '@/components/asset-detail-panel'
 import CreateAssetFolderDialog from '@/components/create-asset-folder-dialog'
 import { useAssetLibraryStore, type AssetFolderFilter } from '@/store/asset-library-store'
 import { useWorkflowStore } from '@/store/workflow-store'
+import { toast } from '@/lib/toast-store'
 
 type UploadListItem = {
   id: string
@@ -218,6 +219,7 @@ export default function AssetLibrarySidebar() {
     catch (err) {
       const message = err instanceof Error ? err.message : '上传失败'
       setError(message)
+      toast.error(message)
       addLog({
         nodeId: 'system',
         nodeTitle: '系统',

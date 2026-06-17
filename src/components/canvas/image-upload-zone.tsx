@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import { ImagePlus, Link2, Loader2, Upload } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { IMAGE_ACCEPT, processImageFile } from '@/lib/image-upload'
+import { toast } from '@/lib/toast-store'
 import MediaPreviewImage from '@/components/media-preview-image'
 import { NodeTextInput } from './node-fields'
 
@@ -43,7 +44,9 @@ export default function ImageUploadZone({ value, onChange, disabled }: ImageUplo
       setShowUrlInput(false)
     }
     catch (err) {
-      setError(err instanceof Error ? err.message : '上传失败')
+      const message = err instanceof Error ? err.message : '上传失败'
+      setError(message)
+      toast.error(message)
     }
     finally {
       uploadingRef.current = false

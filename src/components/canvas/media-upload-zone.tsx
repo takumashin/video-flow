@@ -10,6 +10,7 @@ import {
   VIDEO_ACCEPT,
 } from '@/lib/media-upload-shared'
 import { processMediaFile } from '@/lib/media-upload'
+import { toast } from '@/lib/toast-store'
 import NodeAudioPlayer from './node-audio-player'
 import NodeVideoPlayer from './node-video-player'
 import { NodeTextInput } from './node-fields'
@@ -88,7 +89,9 @@ export default function MediaUploadZone({ kind, value, onChange, disabled }: Med
       setShowUrlInput(false)
     }
     catch (err) {
-      setError(err instanceof Error ? err.message : '上传失败')
+      const message = err instanceof Error ? err.message : '上传失败'
+      setError(message)
+      toast.error(message)
     }
     finally {
       uploadingRef.current = false
