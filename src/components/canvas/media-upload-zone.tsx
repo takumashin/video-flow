@@ -35,7 +35,7 @@ const CONFIG: Record<MediaKind, {
   video: {
     accept: VIDEO_ACCEPT,
     maxSize: MAX_VIDEO_SIZE,
-    sizeLabel: '5MB',
+    sizeLabel: '50MB',
     formatsLabel: 'MP4 / WebM / MOV',
     emptyTitle: '点击或拖拽上传视频',
     previewLabel: '参考视频预览',

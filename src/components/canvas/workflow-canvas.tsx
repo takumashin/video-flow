@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactFlow, {
   Background,
   BackgroundVariant,
+  ConnectionMode,
   SelectionMode,
   useReactFlow,
   type HandleType,
@@ -476,7 +477,7 @@ function WorkflowCanvasInner() {
         onConnect={handleConnect}
         onConnectStart={handleConnectStart}
         onConnectEnd={handleConnectEnd}
-        connectionMode="loose"
+        connectionMode={ConnectionMode.Loose}
         isValidConnection={isValidConnection}
         connectionRadius={64}
         elevateNodesOnSelect

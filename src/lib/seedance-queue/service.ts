@@ -13,14 +13,8 @@ const API_ACTIVE_STATUSES = ['submitting', 'queued', 'running'] as const
 let processing = false
 let processScheduled = false
 
-export function getSeedanceApiTaskId(record: Pick<typeof seedanceTasks.$inferSelect, 'taskId' | 'apiTaskId' | 'status'>): string | null {
-  if (record.apiTaskId)
-    return record.apiTaskId
-
-  if (record.status === 'waiting')
-    return null
-
-  return record.taskId
+export function getSeedanceApiTaskId(record: Pick<typeof seedanceTasks.$inferSelect, 'apiTaskId'>): string | null {
+  return record.apiTaskId ?? null
 }
 
 export async function countActiveSeedanceApiTasks(): Promise<number> {

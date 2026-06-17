@@ -1,13 +1,15 @@
 import type { ListSeedanceTasksOptions, SeedanceCreateTaskRequest, SeedanceTaskListResponse, SeedanceTaskResponse } from './types'
 import type { SeedanceApiVideoParams } from './seedance-params'
+import { DEFAULT_SEEDANCE_MODEL_ID } from './seedance-models'
 import { SEEDANCE_POLL_INTERVAL_MS } from './seedance-progress'
+import { createSeedanceApiError } from './seedance-api-error'
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com'
 
 export function getSeedanceConfig() {
   const apiKey = process.env.ARK_API_KEY
   const baseUrl = process.env.ARK_BASE_URL || DEFAULT_BASE_URL
-  const defaultModel = process.env.ARK_MODEL || 'doubao-seedance-1-5-pro-251215'
+  const defaultModel = process.env.ARK_MODEL || DEFAULT_SEEDANCE_MODEL_ID
 
   if (!apiKey) {
     throw new Error('ARK_API_KEY 未配置，请在 .env.local 中设置火山方舟 API Key')
@@ -31,7 +33,7 @@ export async function createSeedanceTask(payload: SeedanceCreateTaskRequest): Pr
   const data = await response.json()
 
   if (!response.ok) {
-    throw new Error(data?.error?.message || data?.message || `创建任务失败 (${response.status})`)
+    throw createSeedanceApiError(data, `创建任务失败 (${response.status})`, response.status)
   }
 
   return { id: data.id }
@@ -76,7 +78,7 @@ export async function getSeedanceTask(taskId: string): Promise<SeedanceTaskRespo
   const data = await response.json()
 
   if (!response.ok) {
-    throw new Error(data?.error?.message || data?.message || `查询任务失败 (${response.status})`)
+    throw createSeedanceApiError(data, `查询任务失败 (${response.status})`, response.status)
   }
 
   return data as SeedanceTaskResponse

@@ -56,7 +56,7 @@ function NodeBody({
     case NodeType.Start:
       return (
         <p className="text-xs leading-relaxed text-muted">
-          历史工作流入口节点。请在「<SeedanceBrandText text="Seedance 生成" />」节点上点击「生成视频」。
+          历史工作流入口节点。请选中「<SeedanceBrandText text="Seedance 生成" />」节点，在右侧栏点击「生成视频」。
         </p>
       )
 
@@ -118,7 +118,7 @@ function NodeBody({
               disabled={disabled}
             />
           </div>
-          <p className="text-[10px] text-muted">全能参考模式最多连接 3 个，单文件最大 5MB</p>
+          <p className="text-[10px] text-muted">全能参考模式最多连接 3 个，单文件最大 50MB</p>
         </div>
       )
 

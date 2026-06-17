@@ -9,7 +9,8 @@ import {
   getRecommendedModelForModeChange,
   shouldDisableAudio,
 } from '@/lib/seedance-models'
-import { getSeedanceUpstreamRefs, hasSeedancePromptContent } from '@/lib/seedance-upstream'
+import { getSeedanceUpstreamRefs } from '@/lib/seedance-upstream'
+import { validateSeedanceNode } from '@/lib/workflow-engine'
 import { isSeedanceJobInflight } from '@/lib/seedance-generation-control'
 import { SEEDANCE_MODE_OPTIONS } from '@/lib/seedance-modes'
 import { getSeedanceTaskPhaseLabel, isSystemQueuedSeedanceTaskStatus } from '@/lib/seedance-progress'
@@ -79,14 +80,16 @@ function getSeedanceNodeGeneratingLabel(
   })
 }
 
-function SeedanceGenerateButton({
+export function SeedanceGenerateButton({
   id,
   data,
   nodes,
+  edges,
 }: {
   id: string
   data: SeedanceNodeData
   nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
 }) {
   const activeSessionId = useWorkflowStore(s => s.activeSessionId)
   const cancelSeedanceNode = useWorkflowStore(s => s.cancelSeedanceNode)
@@ -94,11 +97,8 @@ function SeedanceGenerateButton({
   const isJobActive = isSeedanceJobInflight(activeSessionId, id)
   const isStuckGenerating = isGenerating && !isJobActive
   const canCancel = isGenerating && !isStuckGenerating && (isJobActive || !!data.taskId)
-  const seedanceNode = nodes.find(node => node.id === id)
-  const hasPrompt = seedanceNode
-    ? hasSeedancePromptContent(seedanceNode)
-    : (data.prompt ?? '').trim().length > 0
-  const canSubmit = hasPrompt || isStuckGenerating
+  const validationError = isGenerating ? null : validateSeedanceNode(id, nodes, edges)
+  const canSubmit = !validationError || isStuckGenerating
   const displayProgress = useSeedanceNodeProgress(data, isGenerating)
   const generatingLabel = getSeedanceNodeGeneratingLabel(data, displayProgress)
   const [cancelling, setCancelling] = useState(false)
@@ -159,10 +159,8 @@ function SeedanceGenerateButton({
       {cancelError && (
         <p className="text-[11px] text-red-600 dark:text-red-400">{cancelError}</p>
       )}
-      {!hasPrompt && !isGenerating && (
-        <p className="text-[11px] text-amber-600 dark:text-amber-400">
-          请先在右侧栏或节点内填写提示词后再生成视频
-        </p>
+      {validationError && !isGenerating && (
+        <p className="text-[11px] text-red-600 dark:text-red-400">{validationError}</p>
       )}
     </div>
   )
@@ -353,10 +351,11 @@ export function SeedanceNodeSummary({
         />
       )}
 
-      <SeedanceGenerateButton id={id} data={data} nodes={nodes} />
-
       {!selected && !isGenerating && (
-        <p className="text-[10px] text-muted/80">点击节点后在右侧栏编辑参数</p>
+        <p className="text-[10px] text-muted/80">选中节点后，在右侧栏配置并生成视频</p>
+      )}
+      {selected && !isGenerating && (
+        <p className="text-[10px] text-muted/80">在右侧栏点击「生成视频」</p>
       )}
     </div>
   )
@@ -375,9 +374,7 @@ export function SeedanceNodeDetailPanel({
   const pruneSeedanceEdgesForMode = useWorkflowStore(s => s.pruneSeedanceEdgesForMode)
   const upstreamRefs = getSeedanceUpstreamRefs(id, nodes, edges)
   const seedanceNode = nodes.find(node => node.id === id)
-  const hasPrompt = seedanceNode
-    ? hasSeedancePromptContent(seedanceNode)
-    : (data.prompt ?? '').trim().length > 0
+  const validationError = validateSeedanceNode(id, nodes, edges)
 
   return (
     <div
@@ -403,11 +400,6 @@ export function SeedanceNodeDetailPanel({
           mode={data.generationMode ?? 'text_to_video'}
           disabled={disabled}
         />
-        {!hasPrompt && (
-          <p className="text-[11px] text-amber-600 dark:text-amber-400">
-            请填写视频描述（提示词），未填写时无法提交生成
-          </p>
-        )}
         <SeedanceConnectedInputs
           seedanceNodeId={id}
           refs={upstreamRefs}
@@ -422,7 +414,12 @@ export function SeedanceNodeDetailPanel({
           onUploadFrameImage={(role, imageUrl) =>
             useWorkflowStore.getState().setSeedanceFrameImage(id, role, imageUrl)}
         />
-        <SeedanceConnectedTextHint refs={upstreamRefs} />
+        {!validationError && (
+          <SeedanceConnectedTextHint refs={upstreamRefs} />
+        )}
+        {validationError && (
+          <p className="text-[11px] text-red-600 dark:text-red-400">{validationError}</p>
+        )}
         <SeedanceModeSwitcher
           value={data.generationMode ?? 'text_to_video'}
           onChange={generationMode => {
@@ -439,6 +436,7 @@ export function SeedanceNodeDetailPanel({
         <SeedanceModelSelect
           mode={data.generationMode ?? 'text_to_video'}
           model={data.model}
+          resolution={data.resolution ?? '720p'}
           onModelChange={(model, supportsAudio) => updateNodeData(id, {
             model,
             generateAudio: supportsAudio ? data.generateAudio : false,

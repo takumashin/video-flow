@@ -40,6 +40,7 @@ const EXT_BY_MIME: Record<string, string> = {
   'video/mp4': '.mp4',
   'video/webm': '.webm',
   'video/quicktime': '.mov',
+  'video/x-quicktime': '.mov',
   'audio/mpeg': '.mp3',
   'audio/mp3': '.mp3',
   'audio/wav': '.wav',
@@ -69,8 +70,26 @@ export function getMimeTypeFromFilename(filename: string): string {
   return MIME_BY_EXT[ext] ?? 'application/octet-stream'
 }
 
-export function getExtensionFromMime(mime: string): string {
-  return EXT_BY_MIME[mime] ?? '.jpg'
+export function getExtensionFromMime(mime: string, kind?: UploadAssetKind, originalFilename?: string): string {
+  const normalized = mime.split(';')[0].trim().toLowerCase()
+  const fromMime = EXT_BY_MIME[normalized]
+  if (fromMime)
+    return fromMime
+
+  if (originalFilename) {
+    const ext = path.extname(originalFilename).toLowerCase()
+    if (MIME_BY_EXT[ext])
+      return ext
+  }
+
+  if (kind === 'video')
+    return '.mp4'
+  if (kind === 'audio')
+    return '.mp3'
+  if (kind === 'image')
+    return '.jpg'
+
+  return '.bin'
 }
 
 export type UploadAssetKind = 'image' | 'video' | 'audio'
@@ -115,6 +134,7 @@ export async function saveUpload(
   userId: string,
   originalFilename?: string,
   folderId?: string | null,
+  kindHint?: UploadAssetKind,
 ): Promise<{ id: string, url: string, kind: UploadAssetKind }> {
   await ensureUploadDir(workspaceId)
 
@@ -124,13 +144,13 @@ export async function saveUpload(
       throw new Error('文件夹不存在')
   }
 
-  const ext = getExtensionFromMime(mimeType)
+  const ext = getExtensionFromMime(mimeType, kindHint, originalFilename)
   const filename = `${uuidv4()}${ext}`
   const storagePath = path.join('uploads', workspaceId, filename)
   const filePath = path.join(process.cwd(), 'data', storagePath)
   await fs.writeFile(filePath, buffer)
 
-  const kind = getUploadKindFromFilename(filename)
+  const kind = getUploadKindFromFilename(filename) ?? kindHint
   if (!kind)
     throw new Error('不支持的文件类型')
 

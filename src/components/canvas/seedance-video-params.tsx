@@ -14,9 +14,9 @@ import type { SeedanceVideoRatio, SeedanceVideoResolution } from '@/lib/types'
 import { FieldLabel } from './node-fields'
 
 const RESOLUTION_HINTS: Record<SeedanceVideoResolution, string> = {
-  '480p': '标清 · 适合预览',
-  '720p': '推荐 · 速度与画质平衡',
-  '1080p': '高清 · 更清晰画面',
+  '480p': '标清 · 0.8× 点数 · 适合预览',
+  '720p': '推荐 · 1× 点数 · 速度与画质平衡',
+  '1080p': '高清 · 3× 点数 · 更清晰画面',
 }
 
 function RatioPreview({ ratio, className }: { ratio: SeedanceVideoRatio; className?: string }) {

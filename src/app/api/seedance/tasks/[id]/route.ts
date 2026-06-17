@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { resolveSeedanceDisplayProgress } from '@/lib/seedance-progress'
+import { formatSeedanceUserError } from '@/lib/seedance-error-messages'
 import {
   cancelSeedanceTaskForUser,
   getSeedanceTaskRecordForUser,
@@ -26,7 +27,25 @@ export async function GET(_request: Request, { params }: RouteParams) {
     if (!record)
       return NextResponse.json({ error: '任务不存在或无权访问' }, { status: 404 })
 
-    const synced = await syncSeedanceTaskRecordFromApi(userId, id)
+    let synced
+    try {
+      synced = await syncSeedanceTaskRecordFromApi(userId, id)
+    }
+    catch (error) {
+      if (record.status === 'failed' || record.status === 'cancelled') {
+        synced = {
+          record,
+          progress: record.progress ?? 0,
+          videoUrl: record.videoUrl ?? record.remoteVideoUrl ?? undefined,
+          error: record.errorMessage ?? undefined,
+          queuePosition: undefined,
+        }
+      }
+      else {
+        throw error
+      }
+    }
+
     const latest = synced?.record ?? record
     const progressStartedAt = latest.progressStartedAt ?? latest.createdAt.getTime()
 
@@ -56,7 +75,10 @@ export async function GET(_request: Request, { params }: RouteParams) {
       status: latest.status as SeedanceTaskStatus,
       progress: displayProgress ?? latest.progress ?? undefined,
       videoUrl: latest.videoUrl ?? latest.remoteVideoUrl ?? synced?.videoUrl,
-      error: latest.errorMessage ?? synced?.error,
+      error: formatSeedanceUserError(
+        latest.errorMessage ?? synced?.error,
+        synced?.errorCode,
+      ) ?? latest.errorMessage ?? synced?.error,
       errorCode: synced?.errorCode,
       createdAt: latest.createdAt.getTime(),
       updatedAt: latest.updatedAt.getTime(),

@@ -1,4 +1,4 @@
-import type { SeedanceGenerationMode } from './types'
+import type { SeedanceGenerationMode, SeedanceVideoResolution } from './types'
 
 export type SeedanceModelOption = {
   id: string
@@ -34,6 +34,15 @@ export const SEEDANCE_MODELS: SeedanceModelOption[] = [
     docUrl: 'https://www.volcengine.com/docs/82379/2291680',
   },
   {
+    id: 'doubao-seedance-2-0-mini-260615',
+    label: 'Seedance 2.0 Mini',
+    description: '2.0 轻量版，成本约为标准版 50%，适合电商/营销批量生成',
+    creditCost: 250,
+    supportedModes: ['text_to_video', 'image_to_video', 'first_last_frame', 'omni_reference'],
+    supportsAudio: true,
+    docUrl: 'https://www.volcengine.com/docs/82379/2291680',
+  },
+  {
     id: 'doubao-seedance-1-5-pro-251215',
     label: 'Seedance 1.5 Pro',
     description: '首尾帧、图生视频，支持生成音频（推荐通用）',
@@ -64,11 +73,13 @@ export const SEEDANCE_MODELS: SeedanceModelOption[] = [
 
 export const CUSTOM_MODEL_VALUE = '__custom_endpoint__'
 
+export const DEFAULT_SEEDANCE_MODEL_ID = 'doubao-seedance-2-0-mini-260615'
+
 export const DEFAULT_MODEL_BY_MODE: Record<SeedanceGenerationMode, string> = {
-  text_to_video: 'doubao-seedance-1-5-pro-251215',
-  image_to_video: 'doubao-seedance-1-5-pro-251215',
-  first_last_frame: 'doubao-seedance-1-5-pro-251215',
-  omni_reference: 'doubao-seedance-2-0-260128',
+  text_to_video: DEFAULT_SEEDANCE_MODEL_ID,
+  image_to_video: DEFAULT_SEEDANCE_MODEL_ID,
+  first_last_frame: DEFAULT_SEEDANCE_MODEL_ID,
+  omni_reference: DEFAULT_SEEDANCE_MODEL_ID,
 }
 
 export function isEndpointId(value: string): boolean {
@@ -126,12 +137,37 @@ export function shouldDisableAudio(modelId: string): boolean {
 /** 自定义 Endpoint 或未收录模型的默认扣点 */
 export const DEFAULT_CUSTOM_MODEL_CREDIT_COST = 300
 
+/** 720p 为 1× 基准倍率 */
+export const RESOLUTION_CREDIT_MULTIPLIERS: Record<SeedanceVideoResolution, number> = {
+  '480p': 0.8,
+  '720p': 1,
+  '1080p': 3,
+}
+
+export function getResolutionCreditMultiplier(
+  resolution?: SeedanceVideoResolution | string | null,
+): number {
+  const normalized = (resolution ?? '720p') as SeedanceVideoResolution
+  return RESOLUTION_CREDIT_MULTIPLIERS[normalized] ?? 1
+}
+
+export function getSeedanceGenerationCreditCost(
+  modelId: string,
+  resolution?: SeedanceVideoResolution | string | null,
+): number {
+  const base = getSeedanceModelCreditCost(modelId)
+  const multiplier = getResolutionCreditMultiplier(resolution)
+  return Math.max(1, Math.round(base * multiplier))
+}
+
 export function getSeedanceModelCreditCost(modelId: string): number {
   const option = getModelOption(modelId)
   if (option)
     return option.creditCost
 
   const normalized = modelId.trim().toLowerCase()
+  if (normalized.includes('seedance-2-0-mini'))
+    return 250
   if (normalized.includes('seedance-2-0-fast'))
     return 400
   if (normalized.includes('seedance-2-0'))

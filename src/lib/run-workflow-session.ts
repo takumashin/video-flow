@@ -16,16 +16,6 @@ import { notifyCreditsChanged } from '@/lib/credits/client-events'
 import { formatSeedanceUserError } from '@/lib/seedance-error-messages'
 import { flushWorkflowSessionSave } from '@/lib/workflow-auto-save-control'
 
-function mapTaskStatusToNodeStatus(
-  status: SeedanceTaskStatus,
-): 'running' | 'succeeded' | 'failed' {
-  if (status === 'succeeded')
-    return 'succeeded'
-  if (status === 'failed' || status === 'cancelled')
-    return 'failed'
-  return 'running'
-}
-
 export type RunSeedanceDeps = {
   upsertLocalTask: (item: {
     id: string
@@ -68,12 +58,76 @@ async function pollAndCompleteSeedanceTask(
 ) {
   const { sessionId, taskId, prompt, progressStartedAt, signal, workflowId } = payload
 
+  const applyFailureState = (failureMessage: string, pollResult: { status: SeedanceTaskStatus, progress?: number, errorCode?: string }) => {
+    deps.updateNodeData(node.id, {
+      status: 'failed',
+      progress: pollResult.progress ?? 0,
+      progressStartedAt: undefined,
+      taskStatus: undefined,
+      queuePosition: undefined,
+      error: failureMessage,
+    })
+    deps.upsertLocalTask({
+      id: taskId,
+      taskId,
+      prompt,
+      nodeTitle: node.data.title,
+      status: 'failed',
+      progress: pollResult.progress ?? 0,
+      createdAt: progressStartedAt,
+      workflowId,
+      nodeId: node.id,
+    })
+    deps.addLog({
+      nodeId: node.id,
+      nodeTitle: node.data.title,
+      message: failureMessage,
+      level: 'error',
+    })
+    notifyCreditsChanged()
+    flushWorkflowSessionSave(sessionId)
+  }
+
   const pollResult = await pollSeedanceTaskClient(taskId, {
     intervalMs: SEEDANCE_POLL_INTERVAL_MS,
     startedAtMs: progressStartedAt,
     signal,
     onProgress: (result) => {
-      if (result.status === 'succeeded' || result.status === 'failed' || result.status === 'cancelled')
+      if (result.status === 'failed') {
+        const failureMessage = formatSeedanceUserError(
+          result.error,
+          result.errorCode,
+          '视频生成失败',
+        )
+        applyFailureState(failureMessage, result)
+        return
+      }
+
+      if (result.status === 'cancelled') {
+        deps.updateNodeData(node.id, {
+          status: 'idle',
+          progress: undefined,
+          progressStartedAt: undefined,
+          taskId: undefined,
+          taskStatus: undefined,
+          queuePosition: undefined,
+          error: undefined,
+        })
+        deps.upsertLocalTask({
+          id: taskId,
+          taskId,
+          prompt,
+          nodeTitle: node.data.title,
+          status: 'cancelled',
+          progress: 0,
+          createdAt: progressStartedAt,
+          workflowId,
+          nodeId: node.id,
+        })
+        return
+      }
+
+      if (result.status === 'succeeded')
         return
 
       const isSystemQueue = result.status === 'waiting' || result.status === 'submitting'
@@ -87,6 +141,7 @@ async function pollAndCompleteSeedanceTask(
         progressStartedAt: activeProgressStartedAt,
         taskStatus: result.status,
         queuePosition: result.queuePosition,
+        error: undefined,
       })
       deps.upsertLocalTask({
         id: taskId,
@@ -106,26 +161,6 @@ async function pollAndCompleteSeedanceTask(
 
   if (pollResult.status !== 'succeeded') {
     if (pollResult.status === 'cancelled') {
-      deps.updateNodeData(node.id, {
-        status: 'idle',
-        progress: undefined,
-        progressStartedAt: undefined,
-        taskId: undefined,
-        taskStatus: undefined,
-        queuePosition: undefined,
-        error: undefined,
-      })
-      deps.upsertLocalTask({
-        id: taskId,
-        taskId,
-        prompt,
-        nodeTitle: node.data.title,
-        status: 'cancelled',
-        progress: 0,
-        createdAt: progressStartedAt,
-        workflowId,
-        nodeId: node.id,
-      })
       deps.addLog({
         nodeId: node.id,
         nodeTitle: node.data.title,
@@ -140,23 +175,7 @@ async function pollAndCompleteSeedanceTask(
       pollResult.errorCode,
       '视频生成失败',
     )
-
-    deps.updateNodeData(node.id, {
-      status: mapTaskStatusToNodeStatus(pollResult.status),
-      progress: pollResult.progress,
-      progressStartedAt: undefined,
-      taskStatus: undefined,
-      queuePosition: undefined,
-      error: failureMessage,
-    })
-    deps.addLog({
-      nodeId: node.id,
-      nodeTitle: node.data.title,
-      message: failureMessage,
-      level: 'error',
-    })
-    notifyCreditsChanged()
-    flushWorkflowSessionSave(sessionId)
+    applyFailureState(failureMessage, pollResult)
     throw new Error(failureMessage)
   }
 
@@ -310,12 +329,21 @@ export async function runSeedanceNodeSession(
 
   const validationError = validateSeedanceNode(seedanceNodeId, nodes, edges)
   if (validationError) {
+    deps.updateNodeData(node.id, {
+      status: 'failed',
+      error: validationError,
+      progress: undefined,
+      progressStartedAt: undefined,
+      taskStatus: undefined,
+      queuePosition: undefined,
+    })
     deps.addLog({
       nodeId: seedanceNodeId,
       nodeTitle: node.data.title,
       message: validationError,
       level: 'error',
     })
+    flushWorkflowSessionSave(options.sessionId)
     return
   }
 

@@ -7,7 +7,7 @@ import type {
   WorkflowNode,
 } from './types'
 import { NodeType } from './types'
-import { prepareAudiosForMode, prepareImagesForMode, prepareVideosForMode } from './seedance-modes'
+import { getSeedancePromptRequiredMessage, prepareAudiosForMode, prepareImagesForMode, prepareVideosForMode } from './seedance-modes'
 import { validateSeedanceModeInputs } from './seedance-connection-rules'
 import {
   buildSeedanceExecutionPrompt,
@@ -137,11 +137,11 @@ export function validateSeedanceNode(
     return '无效的 Seedance 生成节点'
 
   const data = seedanceNode.data
+  const mode = data.generationMode ?? 'text_to_video'
 
   if (!hasSeedancePromptContent(seedanceNode))
-    return `节点「${data.title}」请在节点内填写视频描述（文本提示词）`
+    return `节点「${data.title}」：${getSeedancePromptRequiredMessage(mode)}`
 
-  const mode = data.generationMode ?? 'text_to_video'
   const modeError = validateSeedanceModeInputs(mode, seedanceNode.id, nodes, edges)
   if (modeError)
     return `节点「${data.title}」：${modeError}`

@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { RunLogEntry, WorkflowEdge, WorkflowNode } from './types'
 import { NodeType } from './types'
+import { DEFAULT_SEEDANCE_MODEL_ID } from './seedance-models'
 
 export type WorkflowSession = {
   id: string
@@ -26,7 +27,7 @@ export const DEFAULT_WORKFLOW_NODES: WorkflowNode[] = [
       title: 'Seedance 生成',
       prompt: '无人机以极快速度穿越复杂障碍，带来沉浸式飞行体验',
       generationMode: 'text_to_video',
-      model: 'doubao-seedance-1-5-pro-251215',
+      model: DEFAULT_SEEDANCE_MODEL_ID,
       resolution: '720p',
       ratio: '16:9',
       duration: 5,

@@ -5,7 +5,10 @@ import { SeedanceBrandText } from '@/components/seedance-brand-text'
 import type { SeedanceNodeData } from '@/lib/types'
 import { NodeType } from '@/lib/types'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
-import { SeedanceNodeDetailPanel } from '@/components/canvas/seedance-node-panel'
+import {
+  SeedanceGenerateButton,
+  SeedanceNodeDetailPanel,
+} from '@/components/canvas/seedance-node-panel'
 
 export default function SeedanceConfigSidebar() {
   const activeSession = useActiveWorkflowSession()
@@ -45,6 +48,15 @@ export default function SeedanceConfigSidebar() {
           nodes={nodes}
           edges={edges}
           variant="sidebar"
+        />
+      </div>
+
+      <div className="shrink-0 border-t border-border-subtle bg-surface p-4">
+        <SeedanceGenerateButton
+          id={selectedNodeId}
+          data={seedanceData}
+          nodes={nodes}
+          edges={edges}
         />
       </div>
     </aside>

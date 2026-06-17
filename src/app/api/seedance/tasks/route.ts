@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 import { buildSeedanceTaskPayload, getSeedanceConfig, pollSeedanceTask } from '@/lib/seedance'
-import { prepareAudiosForMode, prepareImagesForMode, prepareVideosForMode } from '@/lib/seedance-modes'
+import { prepareAudiosForMode, prepareImagesForMode, prepareVideosForMode, validateSeedanceTaskRequest } from '@/lib/seedance-modes'
 import { buildSeedanceApiVideoParamsFromRequest } from '@/lib/seedance-params'
-import { resolveSeedanceModel, getSeedanceModelCreditCost } from '@/lib/seedance-models'
+import { getSeedanceGenerationCreditCost, resolveSeedanceModel } from '@/lib/seedance-models'
 import {
   InsufficientCreditsError,
   refundCreditsForReviewFailedTask,
@@ -85,7 +85,12 @@ export async function POST(request: Request) {
     } = body
 
     if (!prompt?.trim()) {
-      return NextResponse.json({ error: '提示词不能为空' }, { status: 400 })
+      return NextResponse.json({
+        error: validateSeedanceTaskRequest({
+          mode: generationMode as SeedanceGenerationMode,
+          prompt,
+        }) ?? '请填写文本描述',
+      }, { status: 400 })
     }
 
     const { defaultModel } = getSeedanceConfig()
@@ -154,8 +159,31 @@ export async function POST(request: Request) {
     }
 
     const videoParams = buildSeedanceApiVideoParamsFromRequest(body)
+    const preparedImages = prepareImagesForMode(
+      generationMode as SeedanceGenerationMode,
+      imageItems,
+    )
+    const preparedVideos = prepareVideosForMode(
+      generationMode as SeedanceGenerationMode,
+      videoItems,
+    )
+    const preparedAudios = prepareAudiosForMode(
+      generationMode as SeedanceGenerationMode,
+      audioItems,
+    )
+    const requestValidationError = validateSeedanceTaskRequest({
+      mode: generationMode as SeedanceGenerationMode,
+      prompt: prompt.trim(),
+      images: preparedImages,
+      videos: preparedVideos,
+      audios: preparedAudios,
+    })
+    if (requestValidationError) {
+      return NextResponse.json({ error: requestValidationError }, { status: 400 })
+    }
+
     const payload = buildSeedanceTaskPayload(resolvedModel, prompt, content, videoParams)
-    const creditCost = getSeedanceModelCreditCost(resolvedModel)
+    const creditCost = getSeedanceGenerationCreditCost(resolvedModel, videoParams.resolution)
     const clientTaskId = randomUUID()
 
     try {
@@ -163,6 +191,7 @@ export async function POST(request: Request) {
         userId,
         model: resolvedModel,
         taskId: clientTaskId,
+        resolution: videoParams.resolution,
       })
     }
     catch (error) {

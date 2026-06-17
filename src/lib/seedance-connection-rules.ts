@@ -1,4 +1,4 @@
-import type { ImageContentItem, ImageRole, SeedanceGenerationMode, WorkflowEdge, WorkflowNode } from './types'
+import type { AudioContentItem, ImageContentItem, ImageRole, SeedanceGenerationMode, VideoContentItem, WorkflowEdge, WorkflowNode } from './types'
 import { NodeType } from './types'
 import { validateSeedanceMode } from './seedance-modes'
 import { getOrderedUpstreamImageNodes, getUpstreamNodes } from './workflow-engine'
@@ -395,5 +395,25 @@ export function validateSeedanceModeInputs(
     })
   }
 
-  return validateSeedanceMode(mode, images)
+  const videos: VideoContentItem[] = []
+  for (const node of upstream) {
+    if (node.data.type !== NodeType.VideoInput)
+      continue
+    const videoData = node.data
+    if (!videoData.mediaUrl.trim())
+      continue
+    videos.push({ videoUrl: videoData.mediaUrl.trim() })
+  }
+
+  const audios: AudioContentItem[] = []
+  for (const node of upstream) {
+    if (node.data.type !== NodeType.AudioInput)
+      continue
+    const audioData = node.data
+    if (!audioData.mediaUrl.trim())
+      continue
+    audios.push({ audioUrl: audioData.mediaUrl.trim() })
+  }
+
+  return validateSeedanceMode(mode, images, { videos, audios })
 }
