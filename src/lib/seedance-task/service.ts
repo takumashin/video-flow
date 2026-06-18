@@ -2,6 +2,7 @@ import { and, count, desc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db'
 import { seedanceTasks } from '@/db/schema'
 import { extractSeedanceTaskProgress, getSeedanceTask, cancelSeedanceTask } from '@/lib/seedance'
+import { isNonRetryableSeedanceError, SeedanceApiError } from '@/lib/seedance-api-error'
 import { refundCreditsForReviewFailedTask } from '@/lib/credits/service'
 import { getSeedanceApiTaskId, getWaitingQueuePosition, scheduleSeedanceQueueProcessing } from '@/lib/seedance-queue/service'
 import type { SeedanceTaskListItem, SeedanceTaskStatus } from '@/lib/types'
@@ -34,6 +35,53 @@ export class SeedanceTaskNotCancellableError extends Error {
     super(message)
     this.name = 'SeedanceTaskNotCancellableError'
   }
+}
+
+function buildLocalSyncResult(
+  record: SeedanceTaskRecord,
+  options?: { errorCode?: string, queuePosition?: number },
+) {
+  return {
+    record,
+    progress: record.progress ?? (record.status === 'succeeded' ? 100 : 0),
+    videoUrl: record.videoUrl ?? record.remoteVideoUrl ?? undefined,
+    error: record.errorMessage ?? undefined,
+    errorCode: options?.errorCode,
+    queuePosition: options?.queuePosition,
+  }
+}
+
+async function failSeedanceTaskRecord(
+  record: SeedanceTaskRecord,
+  errorMessage: string,
+  options?: { errorCode?: string },
+) {
+  const [updated] = await db
+    .update(seedanceTasks)
+    .set({
+      status: 'failed',
+      progress: 0,
+      errorMessage,
+      updatedAt: new Date(),
+    })
+    .where(eq(seedanceTasks.id, record.id))
+    .returning()
+
+  if (record.status !== 'failed') {
+    const submitPayload = record.submitPayload as SeedanceTaskSubmitPayload | null
+    await refundCreditsForReviewFailedTask({
+      userId: record.userId,
+      taskId: record.taskId,
+      model: record.model,
+      creditCost: submitPayload?.creditCost,
+      errorMessage,
+    }).catch(error => {
+      console.error('[seedance-task] 标记失败后退还点数失败:', error)
+    })
+    scheduleSeedanceQueueProcessing()
+  }
+
+  return buildLocalSyncResult(updated, { errorCode: options?.errorCode })
 }
 
 export async function cancelSeedanceTaskForUser(userId: string, taskId: string) {
@@ -250,66 +298,85 @@ export async function syncSeedanceTaskRecordFromApi(userId: string, taskId: stri
   if (!record)
     return null
 
-  if (record.status === 'waiting' || record.status === 'submitting') {
-    const queuePosition = record.status === 'waiting'
-      ? await getWaitingQueuePosition(record.id)
-      : null
+  if (record.status === 'waiting') {
+    const queuePosition = await getWaitingQueuePosition(record.id)
+    return buildLocalSyncResult(record, { queuePosition: queuePosition ?? undefined })
+  }
+
+  if (record.status === 'submitting') {
+    return buildLocalSyncResult(record)
+  }
+
+  if (!record.apiTaskId) {
+    if (record.status === 'failed' || record.status === 'cancelled' || record.status === 'succeeded')
+      return buildLocalSyncResult(record)
+
+    if (record.status === 'queued' || record.status === 'running') {
+      return failSeedanceTaskRecord(record, record.errorMessage ?? '任务状态异常，未找到远程任务 ID')
+    }
+
+    return buildLocalSyncResult(record)
+  }
+
+  try {
+    const remote = await getSeedanceTask(record.apiTaskId)
+    const progress = extractSeedanceTaskProgress(remote)
+    const remoteVideoUrl = remote.content?.video_url ?? null
+    const previousStatus = record.status
+
+    const [updated] = await db
+      .update(seedanceTasks)
+      .set({
+        status: remote.status,
+        progress,
+        remoteVideoUrl,
+        videoUrl: record.videoUrl ?? remoteVideoUrl,
+        errorMessage: remote.error?.message ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(seedanceTasks.id, record.id))
+      .returning()
+
+    if (
+      previousStatus !== remote.status
+      && (remote.status === 'succeeded' || remote.status === 'failed' || remote.status === 'cancelled')
+    ) {
+      scheduleSeedanceQueueProcessing()
+    }
+
+    if (previousStatus !== 'failed' && remote.status === 'failed') {
+      const submitPayload = record.submitPayload as SeedanceTaskSubmitPayload | null
+      await refundCreditsForReviewFailedTask({
+        userId: record.userId,
+        taskId: record.taskId,
+        model: record.model,
+        creditCost: submitPayload?.creditCost,
+        errorMessage: updated.errorMessage ?? remote.error?.message,
+      })
+    }
 
     return {
-      record,
-      progress: 0,
-      videoUrl: undefined,
-      error: undefined,
-      queuePosition: queuePosition ?? undefined,
+      record: updated,
+      progress,
+      videoUrl: updated.videoUrl ?? updated.remoteVideoUrl ?? undefined,
+      error: updated.errorMessage ?? undefined,
+      errorCode: remote.error?.code ?? undefined,
+      queuePosition: undefined,
     }
   }
+  catch (error) {
+    const message = error instanceof SeedanceApiError
+      ? error.message
+      : error instanceof Error
+        ? error.message
+        : '查询任务失败'
+    const errorCode = error instanceof SeedanceApiError ? error.code : undefined
 
-  const apiTaskId = getSeedanceApiTaskId(record)
-  if (!apiTaskId)
-    return null
+    if (isNonRetryableSeedanceError(message, errorCode)) {
+      return failSeedanceTaskRecord(record, message, { errorCode })
+    }
 
-  const remote = await getSeedanceTask(apiTaskId)
-  const progress = extractSeedanceTaskProgress(remote)
-  const remoteVideoUrl = remote.content?.video_url ?? null
-  const previousStatus = record.status
-
-  const [updated] = await db
-    .update(seedanceTasks)
-    .set({
-      status: remote.status,
-      progress,
-      remoteVideoUrl,
-      videoUrl: record.videoUrl ?? remoteVideoUrl,
-      errorMessage: remote.error?.message ?? null,
-      updatedAt: new Date(),
-    })
-    .where(eq(seedanceTasks.id, record.id))
-    .returning()
-
-  if (
-    previousStatus !== remote.status
-    && (remote.status === 'succeeded' || remote.status === 'failed' || remote.status === 'cancelled')
-  ) {
-    scheduleSeedanceQueueProcessing()
-  }
-
-  if (previousStatus !== 'failed' && remote.status === 'failed') {
-    const submitPayload = record.submitPayload as SeedanceTaskSubmitPayload | null
-    await refundCreditsForReviewFailedTask({
-      userId: record.userId,
-      taskId: record.taskId,
-      model: record.model,
-      creditCost: submitPayload?.creditCost,
-      errorMessage: updated.errorMessage ?? remote.error?.message,
-    })
-  }
-
-  return {
-    record: updated,
-    progress,
-    videoUrl: updated.videoUrl ?? updated.remoteVideoUrl ?? undefined,
-    error: updated.errorMessage ?? undefined,
-    errorCode: remote.error?.code ?? undefined,
+    throw error
   }
 }
 

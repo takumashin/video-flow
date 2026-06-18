@@ -46,7 +46,7 @@ export async function uploadMediaFile(
     if (kind === 'image')
       throw new Error('图片大小不能超过 10MB')
     if (kind === 'video')
-      throw new Error('视频大小不能超过 5MB')
+      throw new Error('视频大小不能超过 50MB')
     throw new Error('音频大小不能超过 10MB')
   }
 

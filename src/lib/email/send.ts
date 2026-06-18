@@ -27,7 +27,7 @@ function getSmtpConfig() {
 }
 
 export function getAppBaseUrl() {
-  return (process.env.AUTH_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000').replace(/\/$/, '')
+  return (process.env.AUTH_URL || process.env.NEXTAUTH_URL || 'http://0.0.0.0:3000').replace(/\/$/, '')
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<{ sent: boolean; devPreviewUrl?: string }> {

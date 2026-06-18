@@ -24,6 +24,13 @@ import { useTaskQueueStore } from '@/store/task-queue-store'
 import { useWorkflowStore } from '@/store/workflow-store'
 import { notifyCreditsChanged } from '@/lib/credits/client-events'
 
+const IN_PROGRESS_TASK_STATUSES: SeedanceTaskStatus[] = [
+  'waiting',
+  'submitting',
+  'queued',
+  'running',
+]
+
 const STATUS_FILTERS: Array<{ value: SeedanceTaskStatus | 'all'; label: string }> = [
   { value: 'all', label: '全部' },
   { value: 'waiting', label: '系统排队' },
@@ -266,6 +273,7 @@ export default function TaskQueuePanel() {
   const upsertLocalTask = useTaskQueueStore(s => s.upsertLocalTask)
   const resumeTaskFromQueue = useWorkflowStore(s => s.resumeTaskFromQueue)
   const cancelSeedanceTask = useWorkflowStore(s => s.cancelSeedanceTask)
+  const syncSeedanceTaskStatusToWorkflow = useWorkflowStore(s => s.syncSeedanceTaskStatusToWorkflow)
 
   const [items, setItems] = useState<SeedanceTaskListItem[]>([])
   const [total, setTotal] = useState(0)
@@ -277,7 +285,7 @@ export default function TaskQueuePanel() {
   itemsRef.current = items
 
   const activeTaskIds = items
-    .filter(item => item.status === 'queued' || item.status === 'running')
+    .filter(item => IN_PROGRESS_TASK_STATUSES.includes(item.status))
     .map(item => item.id)
     .join(',')
 
@@ -315,6 +323,21 @@ export default function TaskQueuePanel() {
           createdAt: item.created_at ? (item.created_at > 1e12 ? item.created_at : item.created_at * 1000) : Date.now(),
           progressStartedAt: item.progressStartedAt,
         })
+
+        if (item.status === 'failed' || item.status === 'cancelled' || item.status === 'succeeded') {
+          syncSeedanceTaskStatusToWorkflow({
+            taskId: item.id,
+            status: item.status,
+            nodeId: item.nodeId,
+            workflowId: item.workflowId,
+            error: item.error?.message,
+            errorCode: item.error?.code,
+            progress: item.progress,
+            videoUrl: item.content?.video_url,
+            queuePosition: item.queuePosition,
+            progressStartedAt: item.progressStartedAt,
+          })
+        }
       }
     }
     catch (err) {
@@ -323,7 +346,7 @@ export default function TaskQueuePanel() {
     finally {
       setLoading(false)
     }
-  }, [pageNum, pageSize, statusFilter, upsertLocalTask])
+  }, [pageNum, pageSize, statusFilter, upsertLocalTask, syncSeedanceTaskStatusToWorkflow])
 
   useEffect(() => {
     if (!open)
@@ -338,7 +361,7 @@ export default function TaskQueuePanel() {
     let cancelled = false
 
     const pollActiveProgress = async () => {
-      const active = itemsRef.current.filter(item => item.status === 'queued' || item.status === 'running')
+      const active = itemsRef.current.filter(item => IN_PROGRESS_TASK_STATUSES.includes(item.status))
       if (!active.length)
         return
 
@@ -378,10 +401,26 @@ export default function TaskQueuePanel() {
                   content: data.videoUrl
                     ? { ...item.content, video_url: data.videoUrl }
                     : item.content,
+                  error: data.error
+                    ? { message: data.error, code: data.errorCode }
+                    : item.error,
                   updated_at: data.updatedAt ?? item.updated_at,
                 }
               : item,
           ))
+
+          syncSeedanceTaskStatusToWorkflow({
+            taskId: task.id,
+            status: data.status,
+            nodeId: task.nodeId ?? local?.nodeId,
+            workflowId: task.workflowId ?? local?.workflowId,
+            error: data.error,
+            errorCode: data.errorCode,
+            progress: fakeProgress,
+            videoUrl: data.videoUrl,
+            queuePosition: data.queuePosition,
+            progressStartedAt: startedAtMs,
+          })
 
           if (data.status === 'failed')
             notifyCreditsChanged()
@@ -398,7 +437,7 @@ export default function TaskQueuePanel() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [open, activeTaskIds, upsertLocalTask])
+  }, [open, activeTaskIds, upsertLocalTask, syncSeedanceTaskStatusToWorkflow])
 
   const resumeTask = async (task: SeedanceTaskListItem) => {
     setActionId(task.id)

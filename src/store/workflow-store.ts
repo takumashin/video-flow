@@ -6,11 +6,11 @@ import {
   applyNodeChanges,
 } from 'reactflow'
 import { v4 as uuidv4 } from 'uuid'
-import type { ImageRole, RunLogEntry, SeedanceGenerationMode, SeedanceTaskListItem, VideoHistoryItem, WorkflowEdge, WorkflowNode, WorkflowNodeData } from '@/lib/types'
+import type { ImageRole, RunLogEntry, SeedanceGenerationMode, SeedanceNodeData, SeedanceTaskListItem, SeedanceTaskStatus, VideoHistoryItem, WorkflowEdge, WorkflowNode, WorkflowNodeData } from '@/lib/types'
 import { NodeType } from '@/lib/types'
 import { pruneSeedanceUpstreamEdges, validateSeedanceConnection, applySeedanceImageRolesForMode, normalizeWorkflowImageRoles, resolveSeedanceModeForConnection } from '@/lib/seedance-connection-rules'
 import { buildConnectionForNewNode, inferSeedanceGenerationModeForNewNode, type ConnectHandleSide } from '@/lib/connect-node-options'
-import { getRecommendedModelForModeChange, shouldDisableAudio } from '@/lib/seedance-models'
+import { DEFAULT_SEEDANCE_MODEL_ID, getRecommendedModelForModeChange, shouldDisableAudio } from '@/lib/seedance-models'
 import {
   readSeedanceNodePrompt,
   updatePromptAfterAudioRemoval,
@@ -114,6 +114,18 @@ type WorkflowStore = {
   resumeStuckSeedanceJobs: () => void
   reconcileActiveTasks: () => Promise<void>
   reconcileFailedTasks: () => Promise<void>
+  syncSeedanceTaskStatusToWorkflow: (input: {
+    taskId: string
+    status: SeedanceTaskStatus
+    nodeId?: string
+    workflowId?: string | null
+    error?: string
+    errorCode?: string
+    progress?: number
+    videoUrl?: string
+    queuePosition?: number
+    progressStartedAt?: number
+  }) => void
   resumeTaskFromQueue: (task: SeedanceTaskListItem) => Promise<void>
 }
 
@@ -368,6 +380,37 @@ function restoreTaskOnNode(
   })
 }
 
+function findNodeForTaskSync(
+  sessions: WorkflowSession[],
+  input: { taskId: string, nodeId?: string, workflowId?: string | null },
+): { sessionId: string, node: WorkflowNode } | null {
+  const scopedSessions = input.workflowId
+    ? sessions.filter(session => session.workflowId === input.workflowId)
+    : sessions
+
+  const searchSessions = scopedSessions.length > 0 ? scopedSessions : sessions
+
+  if (input.nodeId) {
+    for (const session of searchSessions) {
+      const node = session.nodes.find(candidate =>
+        candidate.id === input.nodeId && candidate.data.type === NodeType.Seedance,
+      )
+      if (node)
+        return { sessionId: session.id, node }
+    }
+  }
+
+  for (const session of searchSessions) {
+    const node = session.nodes.find(candidate =>
+      candidate.data.type === NodeType.Seedance && candidate.data.taskId === input.taskId,
+    )
+    if (node)
+      return { sessionId: session.id, node }
+  }
+
+  return null
+}
+
 function restoreFailedTaskOnNode(
   get: () => WorkflowStoreInternal,
   sessionId: string,
@@ -389,6 +432,128 @@ function restoreFailedTaskOnNode(
     taskStatus: undefined,
     queuePosition: undefined,
   })
+}
+
+function applySeedanceTaskStatusToNode(
+  get: () => WorkflowStoreInternal,
+  set: (partial: Partial<WorkflowStoreInternal> | ((state: WorkflowStoreInternal) => Partial<WorkflowStoreInternal>)) => void,
+  input: {
+    taskId: string
+    status: SeedanceTaskStatus
+    nodeId?: string
+    workflowId?: string | null
+    error?: string
+    errorCode?: string
+    progress?: number
+    videoUrl?: string
+    queuePosition?: number
+    progressStartedAt?: number
+  },
+): boolean {
+  const match = findNodeForTaskSync(get().sessions, input)
+  if (!match || match.node.data.type !== NodeType.Seedance)
+    return false
+
+  const { sessionId, node } = match
+  if (node.data.type !== NodeType.Seedance)
+    return false
+
+  const seedanceData = node.data
+
+  if (input.status === 'failed') {
+    abortSeedanceJob(sessionId, node.id)
+
+    const errorMessage = formatSeedanceUserError(
+      input.error,
+      input.errorCode,
+      '视频生成失败',
+    )
+
+    if (
+      seedanceData.status === 'failed'
+      && seedanceData.taskId === input.taskId
+      && seedanceData.error === errorMessage
+    ) {
+      return false
+    }
+
+    restoreFailedTaskOnNode(get, sessionId, node.id, {
+      id: input.taskId,
+      status: 'failed',
+      error: {
+        message: input.error,
+        code: input.errorCode,
+      },
+    } as SeedanceTaskListItem)
+
+    if (seedanceData.status === 'running') {
+      get().addLogForSession(sessionId, {
+        nodeId: node.id,
+        nodeTitle: seedanceData.title,
+        message: errorMessage,
+        level: 'error',
+      })
+    }
+    set(state => ({
+      sessions: syncSessionRunningState(state.sessions, sessionId),
+    }))
+    return true
+  }
+
+  if (input.status === 'cancelled') {
+    abortSeedanceJob(sessionId, node.id)
+    get().updateNodeDataForSession(sessionId, node.id, {
+      status: 'idle',
+      taskId: undefined,
+      progress: undefined,
+      progressStartedAt: undefined,
+      taskStatus: undefined,
+      queuePosition: undefined,
+      error: undefined,
+    })
+    set(state => ({
+      sessions: syncSessionRunningState(state.sessions, sessionId),
+    }))
+    return true
+  }
+
+  if (input.status === 'succeeded') {
+    abortSeedanceJob(sessionId, node.id)
+    get().updateNodeDataForSession(sessionId, node.id, {
+      status: 'succeeded',
+      taskId: input.taskId,
+      videoUrl: input.videoUrl ?? seedanceData.videoUrl,
+      progress: 100,
+      progressStartedAt: undefined,
+      taskStatus: undefined,
+      queuePosition: undefined,
+      error: undefined,
+    })
+    set(state => ({
+      sessions: syncSessionRunningState(state.sessions, sessionId),
+    }))
+    return true
+  }
+
+  if (seedanceData.status !== 'running' || seedanceData.taskId !== input.taskId)
+    return false
+
+  const isSystemQueue = input.status === 'waiting' || input.status === 'submitting'
+  get().updateNodeDataForSession(sessionId, node.id, {
+    status: 'running',
+    taskId: input.taskId,
+    progress: input.progress,
+    progressStartedAt: isSystemQueue
+      ? undefined
+      : (input.progressStartedAt ?? seedanceData.progressStartedAt),
+    taskStatus: input.status,
+    queuePosition: input.queuePosition,
+    error: undefined,
+  })
+  set(state => ({
+    sessions: syncSessionRunningState(state.sessions, sessionId),
+  }))
+  return true
 }
 
 function resumeStuckSeedanceJobsForStore(
@@ -489,7 +654,7 @@ function createNodeData(type: NodeType): WorkflowNodeData {
         title: 'Seedance 生成',
         prompt: '',
         generationMode: 'text_to_video',
-        model: 'doubao-seedance-1-5-pro-251215',
+        model: DEFAULT_SEEDANCE_MODEL_ID,
         resolution: '720p',
         ratio: '16:9',
         duration: 5,
@@ -1374,72 +1539,39 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()((set, get) => ({
 
           const data = await response.json()
           const tasks = (data.items ?? []) as SeedanceTaskListItem[]
+          const touchedSessions = new Set<string>()
 
-          for (const session of get().sessions) {
-            if (!session.workflowId)
-              continue
+          for (const task of tasks) {
+            const updated = applySeedanceTaskStatusToNode(get, set, {
+              taskId: task.id,
+              status: 'failed',
+              nodeId: task.nodeId,
+              workflowId: task.workflowId,
+              error: task.error?.message,
+              errorCode: task.error?.code,
+            })
 
-            const sessionTasks = tasks.filter(task => task.workflowId === session.workflowId)
-            const latestTaskByNodeId = new Map<string, SeedanceTaskListItem>()
-            const latestTaskByTaskId = new Map<string, SeedanceTaskListItem>()
-            let restored = false
-
-            for (const task of sessionTasks) {
-              const taskUpdatedAt = task.updated_at ?? task.created_at ?? 0
-
-              const existingByTaskId = latestTaskByTaskId.get(task.id)
-              const existingTaskUpdatedAt = existingByTaskId?.updated_at ?? existingByTaskId?.created_at ?? 0
-              if (!existingByTaskId || taskUpdatedAt >= existingTaskUpdatedAt)
-                latestTaskByTaskId.set(task.id, task)
-
-              const node = findSeedanceNodeForTask(session, task)
-              if (!node || node.data.type !== NodeType.Seedance)
-                continue
-
-              const existing = latestTaskByNodeId.get(node.id)
-              const existingUpdatedAt = existing?.updated_at ?? existing?.created_at ?? 0
-              if (!existing || taskUpdatedAt >= existingUpdatedAt)
-                latestTaskByNodeId.set(node.id, task)
+            if (updated) {
+              const match = findNodeForTaskSync(get().sessions, {
+                taskId: task.id,
+                nodeId: task.nodeId,
+                workflowId: task.workflowId,
+              })
+              if (match)
+                touchedSessions.add(match.sessionId)
             }
-
-            for (const node of session.nodes) {
-              if (node.data.type !== NodeType.Seedance)
-                continue
-
-              if (isSeedanceJobInflight(session.id, node.id))
-                continue
-
-              const task = latestTaskByNodeId.get(node.id)
-                ?? (node.data.taskId ? latestTaskByTaskId.get(node.data.taskId) : undefined)
-
-              if (!task)
-                continue
-
-              const errorMessage = formatSeedanceUserError(
-                task.error?.message,
-                task.error?.code,
-                '视频生成失败',
-              )
-
-              if (
-                node.data.status === 'failed'
-                && node.data.error === errorMessage
-                && node.data.taskId === task.id
-              ) {
-                continue
-              }
-
-              restoreFailedTaskOnNode(get, session.id, node.id, task)
-              restored = true
-            }
-
-            if (restored)
-              flushWorkflowSessionSave(session.id)
           }
+
+          for (const sessionId of touchedSessions)
+            flushWorkflowSessionSave(sessionId)
         }
         catch (error) {
           console.error('[seedance] reconcile failed tasks failed:', error)
         }
+      },
+
+      syncSeedanceTaskStatusToWorkflow: input => {
+        applySeedanceTaskStatusToNode(get, set, input)
       },
 
       resumeTaskFromQueue: async (task) => {

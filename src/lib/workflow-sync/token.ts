@@ -89,19 +89,38 @@ function wsProtocolForHttpProtocol(protocol: string): 'ws' | 'wss' {
   return protocol === 'https:' ? 'wss' : 'ws'
 }
 
+function isUnusableClientHost(hostname: string): boolean {
+  return !hostname || hostname === '0.0.0.0' || hostname === '::' || hostname === '[::]'
+}
+
 /** 解析协作 WebSocket 地址：优先 env，其次 AUTH_URL / 请求 Host，最后 localhost */
 export function resolveWorkflowWsUrl(requestHost?: string | null): string {
-  const configured = process.env.NEXT_PUBLIC_WORKFLOW_WS_URL?.trim()
-  if (configured)
-    return configured
-
   const port = getWorkflowWsPort()
+
+  for (const candidate of [
+    process.env.WORKFLOW_WS_URL?.trim(),
+    process.env.NEXT_PUBLIC_WORKFLOW_WS_URL?.trim(),
+  ]) {
+    if (!candidate)
+      continue
+    try {
+      const url = new URL(candidate)
+      if (!isUnusableClientHost(url.hostname))
+        return candidate
+    }
+    catch {
+      // ignore invalid URL
+    }
+  }
+
   const authUrl = process.env.AUTH_URL?.trim() || process.env.NEXTAUTH_URL?.trim()
   if (authUrl) {
     try {
       const url = new URL(authUrl)
-      const wsProtocol = wsProtocolForHttpProtocol(url.protocol)
-      return `${wsProtocol}://${url.hostname}:${port}`
+      if (!isUnusableClientHost(url.hostname)) {
+        const wsProtocol = wsProtocolForHttpProtocol(url.protocol)
+        return `${wsProtocol}://${url.hostname}:${port}`
+      }
     }
     catch {
       // fall through
@@ -111,11 +130,11 @@ export function resolveWorkflowWsUrl(requestHost?: string | null): string {
   const host = requestHost?.trim()
   if (host) {
     const hostname = host.split(':')[0]
-    if (hostname)
+    if (!isUnusableClientHost(hostname))
       return `ws://${hostname}:${port}`
   }
 
-  return `ws://localhost:${port}`
+  return `ws://127.0.0.1:${port}`
 }
 
 export function getWorkflowWsUrl(): string {

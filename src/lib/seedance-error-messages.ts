@@ -113,12 +113,12 @@ const ERROR_RULES: ErrorRule[] = [
     toChinese: () => '该模型生成音频需要提供参考素材，请上传参考图或参考视频后重试。',
   },
   {
-    test: message => /missing[_\s-]?api[_\s-]?key|api key.*not/i.test(message),
-    toChinese: () => '服务未配置 API Key，请联系管理员。',
+    test: message => /api key format is incorrect|invalid[_\s-]?api[_\s-]?key|unauthorized|authentication/i.test(message),
+    toChinese: () => 'API Key 格式错误或无效，请联系管理员检查配置。',
   },
   {
-    test: message => /invalid[_\s-]?api[_\s-]?key|unauthorized|authentication/i.test(message),
-    toChinese: () => 'API Key 无效或未授权，请联系管理员。',
+    test: message => /missing[_\s-]?api[_\s-]?key|api key.*not/i.test(message),
+    toChinese: () => '服务未配置 API Key，请联系管理员。',
   },
   {
     test: message => /invalid[_\s-]?task[_\s-]?id|task.*not found/i.test(message),
@@ -164,6 +164,10 @@ const ERROR_RULES: ErrorRule[] = [
   {
     test: message => /resource exhausted|capacity|overloaded/i.test(message),
     toChinese: () => '服务资源繁忙，请稍后重试。',
+  },
+  {
+    test: message => /playground|cannot invoke the model|only available in the/i.test(message),
+    toChinese: () => '该模型暂不支持 API 调用，仅在火山方舟 Playground 可用，请更换其他模型后重试。',
   },
   {
     test: message => /generation failed|failed to generate|video generation failed/i.test(message),

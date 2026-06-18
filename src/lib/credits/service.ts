@@ -2,7 +2,11 @@ import { and, desc, eq, ilike, or, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { creditTransactions, userCredits, users, type CreditTransactionType } from '@/db/schema'
 import { isReviewRelatedTaskFailure } from '@/lib/credits/refund-policy'
-import { getModelOption, getSeedanceModelCreditCost } from '@/lib/seedance-models'
+import {
+  getModelOption,
+  getSeedanceGenerationCreditCost,
+  getSeedanceModelCreditCost,
+} from '@/lib/seedance-models'
 
 export class InsufficientCreditsError extends Error {
   readonly balance: number
@@ -19,10 +23,10 @@ export class InsufficientCreditsError extends Error {
 export function getInitialUserCredits(): number {
   const raw = process.env.USER_INITIAL_CREDITS?.trim()
   if (!raw)
-    return 5000
+    return 500
 
   const parsed = Number.parseInt(raw, 10)
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5000
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500
 }
 
 export async function getUserCreditBalance(userId: string): Promise<number> {
@@ -267,11 +271,13 @@ export async function spendCreditsForVideoGeneration(input: {
   userId: string
   model: string
   taskId?: string
+  resolution?: string
 }): Promise<{ cost: number, balanceAfter: number }> {
   await ensureUserCreditsAccount(input.userId)
 
-  const cost = getSeedanceModelCreditCost(input.model)
+  const cost = getSeedanceGenerationCreditCost(input.model, input.resolution)
   const modelLabel = getModelOption(input.model)?.label ?? input.model
+  const resolutionLabel = input.resolution ?? '720p'
 
   const balanceAfter = await spendCredits({
     userId: input.userId,
@@ -279,7 +285,7 @@ export async function spendCreditsForVideoGeneration(input: {
     type: 'video_generation',
     model: input.model,
     taskId: input.taskId,
-    description: `视频生成 · ${modelLabel}`,
+    description: `视频生成 · ${modelLabel} · ${resolutionLabel}`,
   })
 
   return { cost, balanceAfter }
