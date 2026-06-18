@@ -342,7 +342,7 @@ export function SeedanceNodeSummary({
         </button>
       )}
 
-      {!isGenerating && (data.status === 'failed' || data.error) && (
+      {!isGenerating && data.status === 'failed' && data.error && (
         <StatusBadge
           status="failed"
           error={data.error}

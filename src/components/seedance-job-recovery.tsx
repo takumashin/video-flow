@@ -29,6 +29,7 @@ export default function SeedanceJobRecovery() {
     void (async () => {
       const store = useWorkflowStore.getState()
       await store.reconcileFailedTasks()
+      await store.reconcileSucceededTasks()
       await store.reconcileActiveTasks()
       store.resumeStuckSeedanceJobs()
     })()

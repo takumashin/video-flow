@@ -209,7 +209,7 @@ export function localizeSeedanceErrorMessage(
 export function formatSeedanceUserError(
   message: string | null | undefined,
   code?: string | null,
-  fallback = '视频生成失败',
+  fallback = '视频生成失败，请稍后重试或联系客服',
 ): string {
   return localizeSeedanceErrorMessage(message, code) ?? fallback
 }

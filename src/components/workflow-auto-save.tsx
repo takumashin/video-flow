@@ -152,8 +152,15 @@ export default function WorkflowAutoSave() {
           broadcastWorkflowSaved(result.id, result.revision)
       }
       catch (error) {
-        dirty.current.set(sessionId, true)
         if (error instanceof WorkflowSaveConflictError) {
+          // 更新 revision 以避免无限重试循环
+          const store = useWorkflowStore.getState()
+          store.setSessionWorkflowMeta(
+            sessionId,
+            error.serverWorkflow.id ?? session.workflowId,
+            error.serverWorkflow.name,
+            error.serverWorkflow.revision,
+          )
           reportSaveConflict(session, error.serverWorkflow)
           const message = error.message
           if (sessionId === activeSessionIdRef.current)
@@ -161,14 +168,22 @@ export default function WorkflowAutoSave() {
           return
         }
 
+        // 非 409 错误才标记为 dirty 重试
+        dirty.current.set(sessionId, true)
         const message = error instanceof Error ? error.message : '自动保存失败'
         if (sessionId === activeSessionIdRef.current)
           setSaveState({ status: 'error', message })
       }
       finally {
         inflight.current.set(sessionId, false)
-        if (dirty.current.get(sessionId))
-          void flushSave(sessionId)
+        // 409 冲突不自动重试，等待用户处理
+        // 其他错误才在 dirty 时重试
+        if (dirty.current.get(sessionId)) {
+          // 添加延迟避免过快重试
+          setTimeout(() => {
+            void flushSave(sessionId)
+          }, 2000)
+        }
       }
     }
 

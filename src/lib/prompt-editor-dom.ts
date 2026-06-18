@@ -254,13 +254,17 @@ export function pastePlainTextAtSelection(text: string) {
   const range = selection.getRangeAt(0)
   const lines = text.replace(/\r\n/g, '\n').split('\n')
 
+  // Build a DocumentFragment with all nodes in correct order
+  const fragment = document.createDocumentFragment()
   lines.forEach((line, index) => {
     if (line)
-      range.insertNode(document.createTextNode(line))
+      fragment.appendChild(document.createTextNode(line))
     if (index < lines.length - 1)
-      range.insertNode(document.createElement('br'))
+      fragment.appendChild(document.createElement('br'))
   })
 
+  // Insert all nodes at once to preserve order
+  range.insertNode(fragment)
   range.collapse(false)
   selection.removeAllRanges()
   selection.addRange(range)

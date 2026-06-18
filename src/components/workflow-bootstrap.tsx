@@ -30,6 +30,7 @@ export default function WorkflowBootstrap() {
             revision: data.workflow.revision,
           }, { newTab: false })
           await store.reconcileFailedTasks()
+          await store.reconcileSucceededTasks()
         }
       }
       catch (error) {

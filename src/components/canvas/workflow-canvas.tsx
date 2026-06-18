@@ -103,6 +103,7 @@ function WorkflowCanvasInner() {
   const resolvedTheme = useThemeStore(s => s.resolvedTheme)
   const { screenToFlowPosition } = useReactFlow()
   const containerRef = useRef<HTMLDivElement>(null)
+  const draggingSavedRef = useRef(false) // 追踪是否已经在拖拽开始时保存了状态
   const selectedNodeId = activeSession?.selectedNodeId ?? null
   const flowNodes = nodes.map(node => ({
     ...node,
@@ -245,6 +246,43 @@ function WorkflowCanvasInner() {
     return () => document.removeEventListener('dragend', clearFileDrag)
   }, [setDraggingAssetKind])
 
+  // 撤销/重做快捷键
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // 忽略在输入框中的按键
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        (event.target as HTMLElement)?.contentEditable === 'true'
+      ) {
+        return
+      }
+
+      const isMac = navigator.platform.includes('Mac')
+      const modKey = isMac ? event.metaKey : event.ctrlKey
+
+      // Cmd/Ctrl + Z: 撤销
+      if (modKey && event.key === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        console.log('[undo] triggering undo')
+        useWorkflowStore.getState().undo()
+        return
+      }
+
+      // Cmd/Ctrl + Shift + Z 或 Cmd/Ctrl + Y: 重做
+      if (modKey && (event.key === 'Z' || event.key === 'z' && event.shiftKey || event.key === 'y')) {
+        event.preventDefault()
+        console.log('[redo] triggering redo')
+        useWorkflowStore.getState().redo()
+        return
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    console.log('[keyboard] undo/redo shortcuts registered')
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     const draggingChange = changes.find(
       change => change.type === 'position' && change.dragging && change.position,
@@ -255,19 +293,40 @@ function WorkflowCanvasInner() {
       if (node) {
         const snap = snapNodePosition(node, draggingChange.position, nodes)
         setSnapGuides(snap.guides)
+
+        // 拖拽开始时，保存当前状态到历史
+        if (!draggingSavedRef.current) {
+          draggingSavedRef.current = true
+          const { activeSessionId } = useWorkflowStore.getState()
+          useWorkflowStore.getState().patchSession(activeSessionId, s => ({
+            ...s,
+            nodes: structuredClone(s.nodes),
+            edges: structuredClone(s.edges),
+          }), { forceHistory: true }) // 强制保存历史，即使内容没变
+        }
+
+        // 拖拽过程中不记录历史
         onNodesChange(changes.map(change =>
           change.type === 'position' && change.id === draggingChange.id
             ? { ...change, position: snap.position }
             : change,
-        ))
+        ), { skipHistory: true })
         return
       }
     }
 
-    if (changes.some(change => change.type === 'position' && change.dragging === false))
+    if (changes.some(change => change.type === 'position' && change.dragging === false)) {
       setSnapGuides([])
+      draggingSavedRef.current = false // 拖拽结束，重置标志
+    }
 
-    onNodesChange(changes)
+    // 检查是否是拖拽过程中的位置变化（dragging: true）
+    const isDraggingPositionChange = changes.some(
+      change => change.type === 'position' && change.dragging === true,
+    )
+
+    // 拖拽过程中不记录历史，其他变化使用深比较
+    onNodesChange(changes, { skipHistory: isDraggingPositionChange })
   }, [nodes, onNodesChange])
 
   const isValidConnection = useCallback(
@@ -496,6 +555,10 @@ function WorkflowCanvasInner() {
         maxZoom={2}
         deleteKeyCode={['Backspace', 'Delete']}
         selectionMode={SelectionMode.Partial}
+        panOnDrag={false}
+        panActivationKeyCode="Space"
+        selectionOnDrag={true}
+        selectionKeyCode={null}
         proOptions={{ hideAttribution: true }}
       >
         <Background

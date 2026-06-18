@@ -27,22 +27,27 @@ export async function GET(_request: Request, { params }: RouteParams) {
     if (!record)
       return NextResponse.json({ error: '任务不存在或无权访问' }, { status: 404 })
 
+    // 终态任务不需要再次同步，直接返回存储的数据
+    const isTerminal = record.status === 'succeeded' || record.status === 'failed' || record.status === 'cancelled'
+
     let synced
-    try {
-      synced = await syncSeedanceTaskRecordFromApi(userId, id)
-    }
-    catch (error) {
-      if (record.status === 'failed' || record.status === 'cancelled') {
-        synced = {
-          record,
-          progress: record.progress ?? 0,
-          videoUrl: record.videoUrl ?? record.remoteVideoUrl ?? undefined,
-          error: record.errorMessage ?? undefined,
-          queuePosition: undefined,
-        }
+    if (!isTerminal) {
+      try {
+        synced = await syncSeedanceTaskRecordFromApi(userId, id)
       }
-      else {
-        throw error
+      catch (error) {
+        if (record.status === 'failed' || record.status === 'cancelled') {
+          synced = {
+            record,
+            progress: record.progress ?? 0,
+            videoUrl: record.videoUrl ?? record.remoteVideoUrl ?? undefined,
+            error: record.errorMessage ?? undefined,
+            queuePosition: undefined,
+          }
+        }
+        else {
+          throw error
+        }
       }
     }
 
@@ -70,16 +75,23 @@ export async function GET(_request: Request, { params }: RouteParams) {
       })
     }
 
+    // 只有失败状态才返回错误信息
+    const errorInfo = latest.status === 'failed'
+      ? {
+          error: formatSeedanceUserError(
+            latest.errorMessage ?? synced?.error,
+            synced?.errorCode,
+          ) ?? latest.errorMessage ?? synced?.error,
+          errorCode: synced?.errorCode,
+        }
+      : { error: undefined, errorCode: undefined }
+
     return NextResponse.json({
       taskId: latest.taskId,
       status: latest.status as SeedanceTaskStatus,
       progress: displayProgress ?? latest.progress ?? undefined,
       videoUrl: latest.videoUrl ?? latest.remoteVideoUrl ?? synced?.videoUrl,
-      error: formatSeedanceUserError(
-        latest.errorMessage ?? synced?.error,
-        synced?.errorCode,
-      ) ?? latest.errorMessage ?? synced?.error,
-      errorCode: synced?.errorCode,
+      ...errorInfo,
       createdAt: latest.createdAt.getTime(),
       updatedAt: latest.updatedAt.getTime(),
       prompt: latest.prompt ?? undefined,

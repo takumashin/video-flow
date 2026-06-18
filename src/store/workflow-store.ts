@@ -67,7 +67,7 @@ type WorkflowStore = {
   addSession: () => string
   closeSession: (sessionId: string) => void
   setActiveSession: (sessionId: string) => void
-  onNodesChange: (changes: NodeChange[]) => void
+  onNodesChange: (changes: NodeChange[], options?: { skipHistory?: boolean; forceHistory?: boolean }) => void
   onEdgesChange: (changes: EdgeChange[]) => void
   onConnect: (connection: Connection) => void
   selectNode: (nodeId: string | null) => void
@@ -127,6 +127,9 @@ type WorkflowStore = {
     progressStartedAt?: number
   }) => void
   resumeTaskFromQueue: (task: SeedanceTaskListItem) => Promise<void>
+  reconcileSucceededTasks: () => Promise<void>
+  undo: () => void
+  redo: () => void
 }
 
 function createWorkflowNode(
@@ -395,8 +398,14 @@ function findNodeForTaskSync(
       const node = session.nodes.find(candidate =>
         candidate.id === input.nodeId && candidate.data.type === NodeType.Seedance,
       )
-      if (node)
+      if (node && node.data.type === NodeType.Seedance) {
+        // 如果提供了 taskId，验证节点的 taskId 是否匹配
+        // 避免将旧任务的错误状态应用到已经开始新任务的节点
+        if (input.taskId && node.data.taskId && node.data.taskId !== input.taskId) {
+          continue
+        }
         return { sessionId: session.id, node }
+      }
     }
   }
 
@@ -460,6 +469,20 @@ function applySeedanceTaskStatusToNode(
 
   const seedanceData = node.data
 
+  // 防御性检查：如果节点已经开始新任务，跳过旧任务的状态更新
+  // 避免 reconcileFailedTasks 将旧任务的错误重新应用到已经移动到新任务的节点
+  if (seedanceData.taskId && seedanceData.taskId !== input.taskId) {
+    return false
+  }
+
+  // 特殊检查：如果节点状态是 running 但没有 taskId（正在创建新任务的过渡状态），
+  // 或者 taskId 不匹配，跳过失败状态的应用，避免中断正在创建的新任务
+  if (input.status === 'failed') {
+    if (seedanceData.status === 'running' && (!seedanceData.taskId || seedanceData.taskId !== input.taskId)) {
+      return false
+    }
+  }
+
   if (input.status === 'failed') {
     abortSeedanceJob(sessionId, node.id)
 
@@ -501,6 +524,13 @@ function applySeedanceTaskStatusToNode(
   }
 
   if (input.status === 'cancelled') {
+    // 只在 taskId 匹配时中止任务，避免中断新任务
+    if (seedanceData.taskId && seedanceData.taskId !== input.taskId) {
+      return false
+    }
+    if (seedanceData.status === 'running' && !seedanceData.taskId) {
+      return false
+    }
     abortSeedanceJob(sessionId, node.id)
     get().updateNodeDataForSession(sessionId, node.id, {
       status: 'idle',
@@ -518,17 +548,57 @@ function applySeedanceTaskStatusToNode(
   }
 
   if (input.status === 'succeeded') {
+    // 只在 taskId 匹配时中止任务，避免中断新任务
+    if (seedanceData.taskId && seedanceData.taskId !== input.taskId) {
+      return false
+    }
+    if (seedanceData.status === 'running' && !seedanceData.taskId) {
+      return false
+    }
     abortSeedanceJob(sessionId, node.id)
-    get().updateNodeDataForSession(sessionId, node.id, {
-      status: 'succeeded',
-      taskId: input.taskId,
-      videoUrl: input.videoUrl ?? seedanceData.videoUrl,
-      progress: 100,
-      progressStartedAt: undefined,
-      taskStatus: undefined,
-      queuePosition: undefined,
-      error: undefined,
-    })
+
+    // 将视频添加到历史记录（避免竞态条件导致历史丢失）
+    if (input.videoUrl) {
+      const existingHistory = seedanceData.videoHistory ?? []
+      // 检查是否已存在相同 taskId 或 videoUrl 的记录，避免重复
+      const alreadyExists = existingHistory.some(
+        item => item.taskId === input.taskId || item.videoUrl === input.videoUrl,
+      )
+
+      if (!alreadyExists) {
+        get().appendSeedanceVideoForSession(sessionId, node.id, {
+          videoUrl: input.videoUrl,
+          taskId: input.taskId,
+          createdAt: Date.now(),
+        })
+      }
+      else {
+        // 已存在，只更新当前 videoUrl 和状态
+        get().updateNodeDataForSession(sessionId, node.id, {
+          status: 'succeeded',
+          taskId: input.taskId,
+          videoUrl: input.videoUrl,
+          progress: 100,
+          progressStartedAt: undefined,
+          taskStatus: undefined,
+          queuePosition: undefined,
+          error: undefined,
+        })
+      }
+    }
+    else {
+      get().updateNodeDataForSession(sessionId, node.id, {
+        status: 'succeeded',
+        taskId: input.taskId,
+        videoUrl: input.videoUrl ?? seedanceData.videoUrl,
+        progress: 100,
+        progressStartedAt: undefined,
+        taskStatus: undefined,
+        queuePosition: undefined,
+        error: undefined,
+      })
+    }
+
     set(state => ({
       sessions: syncSessionRunningState(state.sessions, sessionId),
     }))
@@ -594,11 +664,38 @@ async function executeSeedanceJob(
   if (!target || target.data.type !== NodeType.Seedance)
     return
 
-  if (mode === 'run' && target.data.status === 'running')
-    return
-
   if (mode === 'resume' && (target.data.status !== 'running' || !target.data.taskId))
     return
+
+  // 如果是新任务但节点状态卡在 running（之前任务失败但未更新状态），重置为 idle
+  if (mode === 'run' && target.data.status === 'running' && !isSeedanceJobInflight(sessionId, seedanceNodeId)) {
+    set(state => ({
+      sessions: state.sessions.map(s => {
+        if (s.id !== sessionId)
+          return s
+        return {
+          ...s,
+          nodes: s.nodes.map(n => {
+            if (n.id !== seedanceNodeId || n.data.type !== NodeType.Seedance)
+              return n
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                status: 'idle',
+                error: undefined,
+                taskId: undefined,
+                progress: undefined,
+                taskStatus: undefined,
+                queuePosition: undefined,
+                progressStartedAt: undefined,
+              },
+            }
+          }),
+        }
+      }),
+    }))
+  }
 
   const deps = createRunSeedanceDeps(get, set, sessionId)
   const signal = beginSeedanceJob(sessionId, seedanceNodeId)
@@ -672,23 +769,103 @@ function createNodeData(type: NodeType): WorkflowNodeData {
 
 // Internal session-scoped helpers (not exposed on public store type but used via closure)
 type WorkflowStoreInternal = WorkflowStore & {
+  // 内部状态：是否正在进行 undo/redo 操作
+  _isUndoingOrRedoing: boolean
+
   updateNodeDataForSession: (sessionId: string, nodeId: string, data: Partial<WorkflowNodeData>) => void
   appendSeedanceVideoForSession: (sessionId: string, nodeId: string, item: Omit<VideoHistoryItem, 'id'>) => void
   addLogForSession: (sessionId: string, entry: Omit<RunLogEntry, 'id' | 'timestamp'>) => void
   clearLogsForSession: (sessionId: string) => void
-  patchSession: (sessionId: string, updater: (session: WorkflowSession) => WorkflowSession) => void
+  patchSession: (sessionId: string, updater: (session: WorkflowSession) => WorkflowSession, options?: { skipHistory?: boolean; forceHistory?: boolean }) => void
 }
 
 export const useWorkflowStore = create<WorkflowStoreInternal>()((set, get) => ({
       sessions: [initialSession],
       activeSessionId: initialSession.id,
       serverHydrated: false,
+      _isUndoingOrRedoing: false,
 
       setServerHydrated: hydrated => set({ serverHydrated: hydrated }),
 
-      patchSession: (sessionId, updater) => set(state => ({
-        sessions: patchWorkflowSession(state.sessions, sessionId, updater),
-      })),
+      patchSession: (sessionId, updater, options) => set(state => {
+        const session = state.sessions.find(s => s.id === sessionId)
+        if (!session) return state
+
+        const nextState = updater(session)
+
+        // 如果明确跳过历史记录，直接返回
+        if (options?.skipHistory) {
+          return { sessions: patchWorkflowSession(state.sessions, sessionId, () => nextState) }
+        }
+
+        // 如果明确强制记录历史（如拖拽结束），直接记录
+        if (options?.forceHistory) {
+          return {
+            sessions: patchWorkflowSession(state.sessions, sessionId, () => ({
+              ...nextState,
+              historyPast: [
+                ...nextState.historyPast.slice(-49),
+                { nodes: structuredClone(session.nodes), edges: structuredClone(session.edges) },
+              ],
+              historyFuture: [],
+            })),
+          }
+        }
+
+        // 深比较：检查节点和边的实际内容是否变化
+        const haveNodesChanged = () => {
+          if (nextState.nodes.length !== session.nodes.length) return true
+          for (let i = 0; i < nextState.nodes.length; i++) {
+            const newNode = nextState.nodes[i]
+            const oldNode = session.nodes[i]
+            // 比较关键字段：id, position, data（排除 selected 等 UI 状态）
+            if (newNode.id !== oldNode.id) return true
+            if (newNode.position.x !== oldNode.position.x || newNode.position.y !== oldNode.position.y) return true
+            // 比较 data 的关键字段
+            const newData = { ...newNode.data }
+            const oldData = { ...oldNode.data }
+            // 移除 UI 状态字段
+            delete (newData as any).selected
+            delete (oldData as any).selected
+            if (JSON.stringify(newData) !== JSON.stringify(oldData)) return true
+          }
+          return false
+        }
+
+        const haveEdgesChanged = () => {
+          if (nextState.edges.length !== session.edges.length) return true
+          for (let i = 0; i < nextState.edges.length; i++) {
+            const newEdge = nextState.edges[i]
+            const oldEdge = session.edges[i]
+            // 比较关键字段：id, source, target, sourceHandle, targetHandle
+            if (newEdge.id !== oldEdge.id) return true
+            if (newEdge.source !== oldEdge.source) return true
+            if (newEdge.target !== oldEdge.target) return true
+            if (newEdge.sourceHandle !== oldEdge.sourceHandle) return true
+            if (newEdge.targetHandle !== oldEdge.targetHandle) return true
+          }
+          return false
+        }
+
+        const structuralChange = haveNodesChanged() || haveEdgesChanged()
+
+        if (structuralChange) {
+          return {
+            sessions: patchWorkflowSession(state.sessions, sessionId, () => ({
+              ...nextState,
+              // 保存当前状态到历史
+              historyPast: [
+                ...nextState.historyPast.slice(-49), // 保留最近 50 个状态
+                { nodes: structuredClone(session.nodes), edges: structuredClone(session.edges) },
+              ],
+              // 新操作清空重做历史
+              historyFuture: [],
+            })),
+          }
+        }
+
+        return { sessions: patchWorkflowSession(state.sessions, sessionId, () => nextState) }
+      }),
 
       setNodes: nodes => {
         const { activeSessionId } = get()
@@ -835,16 +1012,18 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()((set, get) => ({
           void rememberLastWorkflow(session.workflowId)
       },
 
-      onNodesChange: changes => {
-        const { activeSessionId } = get()
+      onNodesChange: (changes, options) => {
+        const { activeSessionId, _isUndoingOrRedoing } = get()
+        // 如果正在进行 undo/redo，不记录历史
+        const skipHistory = options?.skipHistory || _isUndoingOrRedoing
         get().patchSession(activeSessionId, session => ({
           ...session,
           nodes: applyNodeChanges(changes, session.nodes) as WorkflowNode[],
-        }))
+        }), { skipHistory, forceHistory: options?.forceHistory })
       },
 
       onEdgesChange: changes => {
-        const { activeSessionId } = get()
+        const { activeSessionId, _isUndoingOrRedoing } = get()
         const session = getActiveSession(get())
         if (!session)
           return
@@ -873,7 +1052,8 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()((set, get) => ({
           }
         }
 
-        get().patchSession(activeSessionId, s => ({ ...s, edges: nextEdges, nodes: nextNodes }))
+        // 如果正在进行 undo/redo，不记录历史
+        get().patchSession(activeSessionId, s => ({ ...s, edges: nextEdges, nodes: nextNodes }), { skipHistory: _isUndoingOrRedoing })
       },
 
       onConnect: connection => {
@@ -1570,8 +1750,147 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()((set, get) => ({
         }
       },
 
+      reconcileSucceededTasks: async () => {
+        try {
+          const response = await fetch('/api/seedance/tasks?page_num=1&page_size=100&filter.status=succeeded', {
+            cache: 'no-store',
+          })
+          if (!response.ok)
+            return
+
+          const data = await response.json()
+          const tasks = (data.items ?? []) as SeedanceTaskListItem[]
+          const touchedSessions = new Set<string>()
+
+          console.log('[seedance] reconcileSucceededTasks: found', tasks.length, 'succeeded tasks')
+
+          for (const task of tasks) {
+            // 尝试获取视频 URL（如果任务本身没有，尝试从 API 获取）
+            let videoUrl = task.content?.video_url
+
+            if (!videoUrl && task.id) {
+              try {
+                const taskResponse = await fetch(`/api/seedance/tasks/${task.id}`, { cache: 'no-store' })
+                if (taskResponse.ok) {
+                  const taskData = await taskResponse.json()
+                  videoUrl = taskData.videoUrl
+                }
+              }
+              catch {
+                // 忽略单个任务的获取失败
+              }
+            }
+
+            if (!videoUrl) {
+              console.warn('[seedance] task', task.id, 'has no videoUrl, skipping')
+              continue
+            }
+
+            const match = findNodeForTaskSync(get().sessions, {
+              taskId: task.id,
+              nodeId: task.nodeId,
+              workflowId: task.workflowId,
+            })
+
+            if (!match) {
+              console.warn('[seedance] task', task.id, 'could not find matching node, nodeId:', task.nodeId, 'workflowId:', task.workflowId)
+              continue
+            }
+
+            if (match.node.data.type !== NodeType.Seedance)
+              continue
+
+            const node = match.node
+            const sessionId = match.sessionId
+            const seedanceData = node.data as typeof node.data & { videoHistory?: Array<{ taskId?: string; videoUrl: string }> }
+            const videoHistory = seedanceData.videoHistory ?? []
+
+            // 检查是否已存在
+            const alreadyExists = videoHistory.some(
+              item => item.taskId === task.id || item.videoUrl === videoUrl,
+            )
+
+            if (!alreadyExists) {
+              console.log('[seedance] adding video to history for node', node.id, 'task', task.id)
+              get().appendSeedanceVideoForSession(sessionId, node.id, {
+                videoUrl,
+                taskId: task.id,
+                createdAt: task.updated_at ?? task.created_at ?? Date.now(),
+              })
+              touchedSessions.add(sessionId)
+            }
+          }
+
+          for (const sessionId of touchedSessions)
+            flushWorkflowSessionSave(sessionId)
+        }
+        catch (error) {
+          console.error('[seedance] reconcile succeeded tasks failed:', error)
+        }
+      },
+
       syncSeedanceTaskStatusToWorkflow: input => {
         applySeedanceTaskStatusToNode(get, set, input)
+      },
+
+      undo: () => {
+        const { activeSessionId } = get()
+        const session = getActiveSession(get())
+        if (!session || session.historyPast.length === 0) return
+
+        const previous = session.historyPast[session.historyPast.length - 1]
+
+        // 设置标志，阻止 onNodesChange 记录历史
+        set({ _isUndoingOrRedoing: true })
+
+        // 直接更新 sessions，不通过 patchSession，避免触发历史记录
+        set(state => ({
+          sessions: patchWorkflowSession(state.sessions, activeSessionId, s => ({
+            ...s,
+            nodes: previous.nodes,
+            edges: previous.edges,
+            historyPast: s.historyPast.slice(0, -1),
+            historyFuture: [
+              { nodes: structuredClone(s.nodes), edges: structuredClone(s.edges) },
+              ...s.historyFuture,
+            ],
+          })),
+        }))
+
+        // 延迟重置标志，等待 React Flow 处理完变化
+        setTimeout(() => {
+          set({ _isUndoingOrRedoing: false })
+        }, 100)
+      },
+
+      redo: () => {
+        const { activeSessionId } = get()
+        const session = getActiveSession(get())
+        if (!session || session.historyFuture.length === 0) return
+
+        const next = session.historyFuture[0]
+
+        // 设置标志，阻止 onNodesChange 记录历史
+        set({ _isUndoingOrRedoing: true })
+
+        // 直接更新 sessions，不通过 patchSession，避免触发历史记录
+        set(state => ({
+          sessions: patchWorkflowSession(state.sessions, activeSessionId, s => ({
+            ...s,
+            nodes: next.nodes,
+            edges: next.edges,
+            historyPast: [
+              ...s.historyPast,
+              { nodes: structuredClone(s.nodes), edges: structuredClone(s.edges) },
+            ],
+            historyFuture: s.historyFuture.slice(1),
+          })),
+        }))
+
+        // 延迟重置标志，等待 React Flow 处理完变化
+        setTimeout(() => {
+          set({ _isUndoingOrRedoing: false })
+        }, 100)
       },
 
       resumeTaskFromQueue: async (task) => {

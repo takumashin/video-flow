@@ -92,6 +92,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     strategy: 'jwt',
     maxAge: 30 * 24 * 60 * 60,
   },
+  // 允许 HTTP 环境使用 cookie（非 HTTPS）
+  useSecureCookies: process.env.NODE_ENV === 'production' && process.env.AUTH_URL?.startsWith('https://'),
+  cookies: {
+    sessionToken: {
+      name: `next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production' && process.env.AUTH_URL?.startsWith('https://'),
+        path: '/',
+        maxAge: 30 * 24 * 60 * 60,
+      },
+    },
+  },
   providers,
   events: {
     createUser: async ({ user }) => {

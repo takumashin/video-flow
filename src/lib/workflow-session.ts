@@ -15,6 +15,9 @@ export type WorkflowSession = {
   selectedNodeId: string | null
   videoHistoryModalNodeId: string | null
   runLogPanelOpen: boolean
+  // 撤销/重做历史
+  historyPast: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }[]
+  historyFuture: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }[]
 }
 
 export const DEFAULT_WORKFLOW_NODES: WorkflowNode[] = [
@@ -62,6 +65,8 @@ export function createWorkflowSession(options?: {
     selectedNodeId: null,
     videoHistoryModalNodeId: null,
     runLogPanelOpen: false,
+    historyPast: [],
+    historyFuture: [],
   }
 }
 

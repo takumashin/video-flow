@@ -331,7 +331,8 @@ export async function syncSeedanceTaskRecordFromApi(userId: string, taskId: stri
         progress,
         remoteVideoUrl,
         videoUrl: record.videoUrl ?? remoteVideoUrl,
-        errorMessage: remote.error?.message ?? null,
+        // 保留已有的错误信息，避免被 null 覆盖
+        errorMessage: remote.error?.message ?? record.errorMessage ?? null,
         updatedAt: new Date(),
       })
       .where(eq(seedanceTasks.id, record.id))
