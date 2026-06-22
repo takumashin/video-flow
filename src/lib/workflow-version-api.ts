@@ -1,0 +1,178 @@
+import type {
+  WorkflowBranch,
+  WorkflowDiffResult,
+  WorkflowVersionDetail,
+  WorkflowVersionSummary,
+} from './types'
+
+// ---- Versions ----
+
+export async function fetchWorkflowVersions(
+  workflowId: string,
+  options?: {
+    branch?: string
+    type?: string
+    limit?: number
+    offset?: number
+  },
+): Promise<WorkflowVersionSummary[]> {
+  const params = new URLSearchParams()
+  if (options?.branch) params.set('branch', options.branch)
+  if (options?.type) params.set('type', options.type)
+  if (options?.limit) params.set('limit', String(options.limit))
+  if (options?.offset) params.set('offset', String(options.offset))
+
+  const url = `/api/workflows/${workflowId}/versions${params.size > 0 ? `?${params.toString()}` : ''}`
+  const response = await fetch(url)
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '加载版本列表失败')
+  }
+
+  return data.versions as WorkflowVersionSummary[]
+}
+
+export async function fetchWorkflowVersion(
+  workflowId: string,
+  versionId: string,
+): Promise<WorkflowVersionDetail> {
+  const response = await fetch(`/api/workflows/${workflowId}/versions/${versionId}`)
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '加载版本详情失败')
+  }
+
+  return data.version as WorkflowVersionDetail
+}
+
+export async function saveNamedVersion(
+  workflowId: string,
+  label: string,
+  description?: string,
+): Promise<WorkflowVersionSummary> {
+  const response = await fetch(`/api/workflows/${workflowId}/versions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, description }),
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '保存版本失败')
+  }
+
+  return data.version as WorkflowVersionSummary
+}
+
+export async function restoreWorkflowVersion(
+  workflowId: string,
+  versionId: string,
+) {
+  const response = await fetch(`/api/workflows/${workflowId}/versions/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ versionId }),
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '恢复版本失败')
+  }
+
+  return data.workflow as {
+    id: string
+    name: string
+    nodes: unknown[]
+    edges: unknown[]
+    revision: number
+    updatedAt: number
+  }
+}
+
+export async function fetchVersionDiff(
+  workflowId: string,
+  versionIdA: string,
+  versionIdB: string,
+): Promise<WorkflowDiffResult> {
+  const params = new URLSearchParams({ v1: versionIdA, v2: versionIdB })
+  const response = await fetch(`/api/workflows/${workflowId}/versions/diff?${params.toString()}`)
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '加载版本差异失败')
+  }
+
+  return data.diff as WorkflowDiffResult
+}
+
+// ---- Branches ----
+
+export async function fetchBranches(
+  workflowId: string,
+): Promise<WorkflowBranch[]> {
+  const response = await fetch(`/api/workflows/${workflowId}/branches`)
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '加载分支列表失败')
+  }
+
+  return data.branches as WorkflowBranch[]
+}
+
+export async function createWorkflowBranch(
+  workflowId: string,
+  name: string,
+  sourceVersionId: string,
+): Promise<WorkflowBranch> {
+  const response = await fetch(`/api/workflows/${workflowId}/branches`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, sourceVersionId }),
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '创建分支失败')
+  }
+
+  return data.branch as WorkflowBranch
+}
+
+// ---- Branch switching (client-side: load latest version for branch) ----
+
+export async function switchWorkflowBranch(
+  workflowId: string,
+  branchName: string,
+): Promise<{
+  id: string
+  name: string
+  nodes: unknown[]
+  edges: unknown[]
+  revision: number
+  branchName: string
+} | null> {
+  // Load the latest version for the target branch
+  const versions = await fetchWorkflowVersions(workflowId, {
+    branch: branchName,
+    limit: 1,
+  })
+
+  if (versions.length === 0) return null
+
+  const detail = await fetchWorkflowVersion(workflowId, versions[0].id)
+
+  return {
+    id: workflowId,
+    name: detail.name,
+    nodes: detail.nodes,
+    edges: detail.edges,
+    revision: detail.revision,
+    branchName: detail.branchName,
+  }
+}

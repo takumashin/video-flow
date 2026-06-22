@@ -1,6 +1,6 @@
 import { desc, eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { workflows } from '@/db/schema'
+import { workflows, workflowVersions } from '@/db/schema'
 import { WorkflowRevisionConflictError, type WorkflowUpdateResult } from './workflow-revision'
 import type { SavedWorkflow, WorkflowEdge, WorkflowNode, WorkflowSummary } from './types'
 
@@ -56,17 +56,35 @@ export async function createWorkflow(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
 ): Promise<SavedWorkflow> {
-  const [row] = await db
-    .insert(workflows)
-    .values({
-      workspaceId,
-      createdBy: userId,
-      name: name.trim() || '未命名工作流',
+  const workflowName = name.trim() || '未命名工作流'
+
+  const row = await db.transaction(async (tx) => {
+    const [wf] = await tx
+      .insert(workflows)
+      .values({
+        workspaceId,
+        createdBy: userId,
+        name: workflowName,
+        nodes,
+        edges,
+        revision: 1,
+      })
+      .returning()
+
+    // Create initial version entry
+    await tx.insert(workflowVersions).values({
+      workflowId: wf.id,
+      revision: 1,
+      branchName: 'main',
       nodes,
       edges,
-      revision: 1,
+      name: workflowName,
+      type: 'auto',
+      createdBy: userId,
     })
-    .returning()
+
+    return wf
+  })
 
   return toSavedWorkflow(row)
 }
@@ -94,17 +112,38 @@ export async function updateWorkflow(
     return { ok: false, conflict: true, workflow: existing }
   }
 
-  const [row] = await db
-    .update(workflows)
-    .set({
-      name: payload.name?.trim() || existing.name,
-      nodes: payload.nodes ?? existing.nodes,
-      edges: payload.edges ?? existing.edges,
-      revision: sql`${workflows.revision} + 1`,
-      updatedAt: new Date(),
+  const newName = payload.name?.trim() || existing.name
+  const newNodes = payload.nodes ?? existing.nodes
+  const newEdges = payload.edges ?? existing.edges
+
+  const row = await db.transaction(async (tx) => {
+    // Save the pre-update state as a version snapshot
+    await tx.insert(workflowVersions).values({
+      workflowId: existing.id,
+      revision: existing.revision,
+      branchName: 'main',
+      nodes: existing.nodes,
+      edges: existing.edges,
+      name: existing.name,
+      type: 'auto',
+      createdBy: null, // auto-save, no specific user
     })
-    .where(eq(workflows.id, id))
-    .returning()
+
+    // Update the workflow
+    const [updated] = await tx
+      .update(workflows)
+      .set({
+        name: newName,
+        nodes: newNodes,
+        edges: newEdges,
+        revision: sql`${workflows.revision} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(workflows.id, id))
+      .returning()
+
+    return updated ?? null
+  })
 
   if (!row)
     return { ok: false, conflict: true, workflow: existing }

@@ -50,6 +50,13 @@
       "when": 1781598812131,
       "tag": "0006_crazy_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781937111675,
+      "tag": "0007_overconfident_whistler",
+      "breakpoints": true
     }
   ]
 }

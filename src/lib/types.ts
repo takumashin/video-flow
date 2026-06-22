@@ -130,6 +130,56 @@ export type SavedWorkflow = {
 
 export type WorkflowSummary = Pick<SavedWorkflow, 'id' | 'name' | 'createdAt' | 'updatedAt'>
 
+// ---- Workflow Version Management ----
+
+export type WorkflowVersionType = 'auto' | 'manual' | 'restore'
+
+export type WorkflowVersionSummary = {
+  id: string
+  workflowId: string
+  revision: number
+  branchName: string
+  name: string
+  label: string | null
+  description: string | null
+  type: WorkflowVersionType
+  createdBy: string | null
+  createdByName: string | null
+  createdByImage: string | null
+  createdAt: number
+}
+
+export type WorkflowVersionDetail = WorkflowVersionSummary & {
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+}
+
+export type WorkflowDiffEntry = {
+  type: 'added' | 'removed' | 'modified'
+  id: string
+  title?: string
+  nodeType?: string
+  source?: string
+  target?: string
+  changes?: Array<{ field: string; before: unknown; after: unknown }>
+}
+
+export type WorkflowDiffResult = {
+  versionA: { id: string; revision: number; createdAt: number; label: string | null }
+  versionB: { id: string; revision: number; createdAt: number; label: string | null }
+  nodeChanges: WorkflowDiffEntry[]
+  edgeChanges: WorkflowDiffEntry[]
+}
+
+export type WorkflowBranch = {
+  name: string
+  latestRevision: number
+  latestVersionId: string
+  createdAt: number
+  createdBy: string | null
+  createdByName: string | null
+}
+
 export type ImageContentItem = {
   imageUrl: string
   imageRole: ImageRole

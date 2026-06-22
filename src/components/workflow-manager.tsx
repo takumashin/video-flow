@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  Bookmark,
   Check,
   Cloud,
   Download,
   FolderOpen,
+  History,
   Loader2,
   Plus,
   Save,
@@ -20,6 +22,7 @@ import { sanitizeNodesForSave } from '@/lib/sanitize-workflow'
 import type { SavedWorkflow, WorkflowSummary } from '@/lib/types'
 import { useActiveWorkflowSession } from '@/components/workflow-tabs'
 import { useWorkflowAutoSaveStore } from '@/store/workflow-auto-save-store'
+import { useWorkflowVersionStore } from '@/store/workflow-version-store'
 import { useWorkflowStore } from '@/store/workflow-store'
 
 function formatTime(timestamp: number) {
@@ -108,6 +111,8 @@ export default function WorkflowManager({
   const applyWorkflow = useWorkflowStore(s => s.applyWorkflow)
   const newWorkflow = useWorkflowStore(s => s.newWorkflow)
   const addLog = useWorkflowStore(s => s.addLog)
+  const openVersionPanel = useWorkflowVersionStore(s => s.openVersionPanel)
+  const openSaveDialog = useWorkflowVersionStore(s => s.openSaveDialog)
 
   const fetchWorkflows = useCallback(async () => {
     setListLoading(true)
@@ -378,6 +383,24 @@ export default function WorkflowManager({
                   e.target.value = ''
                 }}
               />
+              <button
+                type="button"
+                disabled={isRunning || loading}
+                onClick={() => openSaveDialog()}
+                className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-surface-muted disabled:opacity-50"
+              >
+                <Bookmark className="h-3.5 w-3.5" />
+                保存版本
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => openVersionPanel()}
+                className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-surface-muted disabled:opacity-50"
+              >
+                <History className="h-3.5 w-3.5" />
+                版本历史
+              </button>
             </div>
 
             <div className="max-h-72 overflow-y-auto p-2">

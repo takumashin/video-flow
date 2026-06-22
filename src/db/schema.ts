@@ -1,5 +1,6 @@
 import {
   bigint,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -8,7 +9,7 @@ import {
   timestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
-import type { WorkflowEdge, WorkflowNode } from '@/lib/types'
+import type { WorkflowEdge, WorkflowNode, WorkflowVersionType } from '@/lib/types'
 
 export const users = pgTable('user', {
   id: text('id')
@@ -199,6 +200,40 @@ export const workflows = pgTable('workflow', {
   createdAt: timestamp('createdAt', { mode: 'date' }).defaultNow().notNull(),
   updatedAt: timestamp('updatedAt', { mode: 'date' }).defaultNow().notNull(),
 })
+
+export const workflowVersions = pgTable(
+  'workflow_version',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    workflowId: text('workflowId')
+      .notNull()
+      .references(() => workflows.id, { onDelete: 'cascade' }),
+    revision: integer('revision').notNull(),
+    branchName: text('branchName').notNull().default('main'),
+    nodes: jsonb('nodes').$type<WorkflowNode[]>().notNull(),
+    edges: jsonb('edges').$type<WorkflowEdge[]>().notNull(),
+    name: text('name').notNull(),
+    label: text('label'),
+    description: text('description'),
+    type: text('type').$type<WorkflowVersionType>().notNull().default('auto'),
+    createdBy: text('createdBy').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('createdAt', { mode: 'date' }).defaultNow().notNull(),
+  },
+  table => ({
+    branchRevisionIdx: index('workflow_version_branch_revision_idx').on(
+      table.workflowId,
+      table.branchName,
+      table.revision.desc(),
+    ),
+    branchCreatedIdx: index('workflow_version_branch_created_idx').on(
+      table.workflowId,
+      table.branchName,
+      table.createdAt.desc(),
+    ),
+  }),
+)
 
 export type AssetKind = 'image' | 'video' | 'audio'
 
