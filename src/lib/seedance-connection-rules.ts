@@ -1,7 +1,7 @@
 import type { AudioContentItem, ImageContentItem, ImageRole, SeedanceGenerationMode, VideoContentItem, WorkflowEdge, WorkflowNode } from './types'
 import { NodeType } from './types'
 import { validateSeedanceMode } from './seedance-modes'
-import { getOrderedUpstreamImageNodes, getUpstreamNodes } from './workflow-engine'
+import { getOrderedUpstreamImageNodes, getOrderedUpstreamVideoNodes, getUpstreamNodes } from './workflow-engine'
 
 export function resolveSeedanceModeForConnection(
   sourceNode: WorkflowNode,
@@ -32,6 +32,7 @@ export function resolveSeedanceModeForConnection(
   if (
     sourceNode.data.type === NodeType.VideoInput
     || sourceNode.data.type === NodeType.AudioInput
+    || sourceNode.data.type === NodeType.Seedance
   ) {
     if (currentMode !== 'omni_reference')
       return 'omni_reference'
@@ -112,7 +113,16 @@ export function countUpstreamVideoConnections(
     if (options?.excludeSourceId && edge.source === options.excludeSourceId)
       return false
     const source = nodes.find(node => node.id === edge.source)
-    return source?.data.type === NodeType.VideoInput
+    if (!source)
+      return false
+    // 支持 VideoInput 和 Seedance 节点（用于续写功能）
+    if (source.data.type === NodeType.VideoInput)
+      return true
+    if (source.data.type === NodeType.Seedance) {
+      const seedanceData = source.data
+      return Boolean(seedanceData.videoUrl || (seedanceData.videoHistory && seedanceData.videoHistory.length > 0))
+    }
+    return false
   }).length
 }
 
@@ -213,6 +223,26 @@ export function validateSeedanceConnection(
     return { ok: true }
   }
 
+  // 支持从 Seedance 节点连接（续写功能）
+  if (sourceNode.data.type === NodeType.Seedance) {
+    if (!rules.allowVideos)
+      return { ok: false, reason: '参考视频仅支持全能参考模式' }
+
+    // 检查 Seedance 节点是否有可用的视频
+    const seedanceData = sourceNode.data
+    const hasVideo = seedanceData.videoUrl || (seedanceData.videoHistory && seedanceData.videoHistory.length > 0)
+    if (!hasVideo)
+      return { ok: false, reason: '该 Seedance 节点尚未生成视频' }
+
+    const existingCount = countUpstreamVideoConnections(target, nodes, edges, {
+      excludeSourceId: source,
+    })
+    if (existingCount >= rules.maxVideos)
+      return { ok: false, reason: '全能参考模式最多连接 3 个参考视频' }
+
+    return { ok: true }
+  }
+
   if (sourceNode.data.type === NodeType.AudioInput) {
     if (!rules.allowAudios)
       return { ok: false, reason: '参考音频仅支持全能参考模式' }
@@ -229,7 +259,7 @@ export function validateSeedanceConnection(
   return { ok: true }
 }
 
-/** 按生成模式为已连接的图片节点写入正确角色（首尾帧：首连=首帧，次连=尾帧） */
+/** 按生成模式为已连接的图片节点写入正确角色（首尾帧：优先保留节点上的首/尾帧标记，再按连线顺序补全） */
 export function applySeedanceImageRolesForMode(
   seedanceNodeId: string,
   mode: SeedanceGenerationMode,
@@ -246,12 +276,31 @@ export function applySeedanceImageRolesForMode(
     case 'image_to_video':
       roleByNodeId.set(imageNodes[0].id, 'first_frame')
       break
-    case 'first_last_frame':
-      if (imageNodes[0])
-        roleByNodeId.set(imageNodes[0].id, 'first_frame')
-      if (imageNodes[1])
-        roleByNodeId.set(imageNodes[1].id, 'last_frame')
+    case 'first_last_frame': {
+      const assigned = new Set<ImageRole>()
+      for (const node of imageNodes) {
+        if (node.data.type !== NodeType.ImageInput)
+          continue
+        const storedRole = node.data.role
+        if (storedRole === 'first_frame' || storedRole === 'last_frame') {
+          roleByNodeId.set(node.id, storedRole)
+          assigned.add(storedRole)
+        }
+      }
+      for (const node of imageNodes) {
+        if (roleByNodeId.has(node.id))
+          continue
+        if (!assigned.has('first_frame')) {
+          roleByNodeId.set(node.id, 'first_frame')
+          assigned.add('first_frame')
+        }
+        else if (!assigned.has('last_frame')) {
+          roleByNodeId.set(node.id, 'last_frame')
+          assigned.add('last_frame')
+        }
+      }
       break
+    }
     case 'omni_reference':
       imageNodes.forEach(node => roleByNodeId.set(node.id, 'reference_image'))
       break
@@ -300,7 +349,13 @@ export function pruneSeedanceUpstreamEdges(
 
   const videoEdges = incoming.filter(edge => {
     const source = nodes.find(node => node.id === edge.source)
-    return source?.data.type === NodeType.VideoInput
+    if (source?.data.type === NodeType.VideoInput)
+      return true
+    if (source?.data.type === NodeType.Seedance) {
+      const seedanceData = source.data
+      return Boolean(seedanceData.videoUrl || (seedanceData.videoHistory && seedanceData.videoHistory.length > 0))
+    }
+    return false
   })
 
   const audioEdges = incoming.filter(edge => {
@@ -350,8 +405,8 @@ export function validateSeedanceModeInputs(
   const rules = getSeedanceModeInputRules(mode)
   const upstream = getUpstreamNodes(seedanceNodeId, nodes, edges)
   const imageCount = upstream.filter(node => node.data.type === NodeType.ImageInput).length
-  const videoCount = upstream.filter(node => node.data.type === NodeType.VideoInput).length
-  const audioCount = upstream.filter(node => node.data.type === NodeType.AudioInput).length
+  const videoCount = countUpstreamVideoConnections(seedanceNodeId, nodes, edges)
+  const audioCount = countUpstreamAudioConnections(seedanceNodeId, nodes, edges)
   const textCount = upstream.filter(node => node.data.type === NodeType.TextPrompt).length
 
   if (!rules.allowImages && imageCount > 0)
@@ -396,13 +451,18 @@ export function validateSeedanceModeInputs(
   }
 
   const videos: VideoContentItem[] = []
-  for (const node of upstream) {
-    if (node.data.type !== NodeType.VideoInput)
+  for (const node of getOrderedUpstreamVideoNodes(seedanceNodeId, nodes, edges)) {
+    if (node.data.type === NodeType.VideoInput) {
+      if (!node.data.mediaUrl.trim())
+        continue
+      videos.push({ videoUrl: node.data.mediaUrl.trim() })
       continue
-    const videoData = node.data
-    if (!videoData.mediaUrl.trim())
-      continue
-    videos.push({ videoUrl: videoData.mediaUrl.trim() })
+    }
+    if (node.data.type === NodeType.Seedance) {
+      const url = node.data.videoUrl ?? node.data.videoHistory?.[0]?.videoUrl
+      if (url?.trim())
+        videos.push({ videoUrl: url.trim() })
+    }
   }
 
   const audios: AudioContentItem[] = []

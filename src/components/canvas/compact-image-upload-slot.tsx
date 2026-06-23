@@ -16,6 +16,9 @@ type CompactImageUploadSlotProps = {
   onClear?: () => void
   disabled?: boolean
   className?: string
+  /** 横向工具栏：固定方框 + 仅图标，无文字 */
+  variant?: 'default' | 'tile'
+  badge?: string
 }
 
 export function CompactImageUploadSlot({
@@ -25,6 +28,8 @@ export function CompactImageUploadSlot({
   onClear,
   disabled,
   className,
+  variant = 'default',
+  badge,
 }: CompactImageUploadSlotProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -115,8 +120,10 @@ export function CompactImageUploadSlot({
   }
 
   return (
-    <div className={cn('space-y-1', className)}>
-      <p className="text-[10px] font-medium text-muted">{label}</p>
+    <div className={cn(variant === 'tile' ? '' : 'space-y-1', className)}>
+      {variant === 'default' && (
+        <p className="text-[10px] font-medium text-muted">{label}</p>
+      )}
       <input
         ref={inputRef}
         type="file"
@@ -135,7 +142,10 @@ export function CompactImageUploadSlot({
           ? (
               <div
                 className={cn(
-                  'group relative aspect-[4/3] overflow-hidden rounded-lg border bg-violet-500/5 transition',
+                  'group relative overflow-hidden rounded-lg border bg-violet-500/5 transition',
+                  variant === 'tile'
+                    ? 'h-14 w-[4.5rem]'
+                    : 'aspect-[4/3]',
                   dragOver
                     ? 'border-primary-light ring-2 ring-primary-light/25'
                     : 'border-violet-500/30',
@@ -148,19 +158,24 @@ export function CompactImageUploadSlot({
                   imageClassName="h-full w-full object-cover"
                   showHint={false}
                 />
+                {badge && (
+                  <div className="absolute left-1 top-1 flex h-4 min-w-4 items-center justify-center rounded bg-black/60 px-0.5 text-[10px] font-semibold leading-none text-white">
+                    {badge}
+                  </div>
+                )}
                 {onClear && (
                   <button
                     type="button"
                     disabled={disabled || uploading}
                     onPointerDown={e => e.stopPropagation()}
-                    onClick={e => {
+                    onClick={(e) => {
                       e.stopPropagation()
                       onClear()
                     }}
-                    className="nodrag absolute right-1 top-1 z-10 rounded-md bg-black/60 p-1 text-white opacity-0 shadow-sm transition hover:bg-red-600 group-hover:opacity-100 disabled:opacity-50"
+                    className="nodrag absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-sm bg-black/70 text-white opacity-0 transition hover:bg-red-600 group-hover:opacity-100 disabled:opacity-50"
                     aria-label={`移除${label}`}
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <X className="h-2.5 w-2.5" strokeWidth={3.5} />
                   </button>
                 )}
               </div>
@@ -170,23 +185,33 @@ export function CompactImageUploadSlot({
                 type="button"
                 disabled={disabled || uploading}
                 onClick={() => inputRef.current?.click()}
+                title={label}
                 className={cn(
-                  'nodrag flex aspect-[4/3] w-full flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed px-2 py-3 text-center transition',
+                  'nodrag flex flex-col items-center justify-center rounded-lg border-2 border-dashed text-center transition',
+                  variant === 'tile'
+                    ? 'h-14 w-[4.5rem] border-border bg-surface-muted hover:border-primary-light/50 hover:bg-surface'
+                    : 'aspect-[4/3] w-full gap-1.5 px-2 py-3',
                   dragOver
                     ? 'border-primary-light bg-primary/10'
-                    : 'border-border bg-surface-muted hover:border-primary-light/40 hover:bg-surface-muted/80',
+                    : variant === 'tile'
+                      ? ''
+                      : 'border-border bg-surface-muted hover:border-primary-light/40 hover:bg-surface-muted/80',
                   (disabled || uploading) && 'opacity-50',
                 )}
               >
                 {uploading
-                  ? <Loader2 className="h-5 w-5 animate-spin text-primary-light" />
+                  ? <Loader2 className={cn('animate-spin text-primary-light', variant === 'tile' ? 'h-4 w-4' : 'h-5 w-5')} />
                   : dragOver
-                    ? <Upload className="h-5 w-5 text-primary-light" />
-                    : <ImagePlus className="h-5 w-5 text-violet-500 dark:text-violet-400" />}
-                <span className="text-[10px] font-medium text-foreground/90">
-                  {uploading ? '上传中…' : '点击上传'}
-                </span>
-                <span className="text-[9px] text-muted">或拖入图片/资产</span>
+                    ? <Upload className={cn('text-primary-light', variant === 'tile' ? 'h-4 w-4' : 'h-5 w-5')} />
+                    : <ImagePlus className={cn('text-violet-500 dark:text-violet-400', variant === 'tile' ? 'h-4 w-4' : 'h-5 w-5')} />}
+                {variant === 'default' && (
+                  <>
+                    <span className="text-[10px] font-medium text-foreground/90">
+                      {uploading ? '上传中…' : '点击上传'}
+                    </span>
+                    <span className="text-[9px] text-muted">或拖入图片/资产</span>
+                  </>
+                )}
               </button>
             )}
       </div>

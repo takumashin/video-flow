@@ -7,6 +7,7 @@ export type WorkflowSavePayload = {
   edges: WorkflowEdge[]
   expectedRevision?: number | null
   force?: boolean
+  branchName?: string
 }
 
 export type WorkflowSaveResult = SavedWorkflow
@@ -31,6 +32,7 @@ export async function saveWorkflowToServer(
     edges: payload.edges,
     expectedRevision: payload.expectedRevision ?? undefined,
     force: payload.force ?? false,
+    branchName: payload.branchName ?? 'main',
   }
 
   const response = workflowId

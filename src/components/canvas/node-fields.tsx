@@ -165,11 +165,36 @@ export function SeedanceModeSwitcher({
   value,
   onChange,
   disabled,
+  layout = 'grid',
 }: {
   value: SeedanceGenerationMode
   onChange: (mode: SeedanceGenerationMode) => void
   disabled?: boolean
+  layout?: 'grid' | 'row'
 }) {
+  if (layout === 'row') {
+    return (
+      <div className="nodrag flex flex-wrap gap-1">
+        {SEEDANCE_MODE_OPTIONS.map(option => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'rounded-lg px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50',
+              value === option.value
+                ? 'bg-primary/15 text-primary-light'
+                : 'text-secondary hover:bg-surface-muted hover:text-foreground',
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-2">
       <FieldLabel>生成模式</FieldLabel>

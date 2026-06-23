@@ -10,6 +10,7 @@ export type WorkflowSession = {
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
   revision: number | null
+  branchName: string
   isRunning: boolean
   runLogs: RunLogEntry[]
   selectedNodeId: string | null
@@ -52,6 +53,7 @@ export function createWorkflowSession(options?: {
   nodes?: WorkflowNode[]
   edges?: WorkflowEdge[]
   revision?: number | null
+  branchName?: string
 }): WorkflowSession {
   return {
     id: uuidv4(),
@@ -60,6 +62,7 @@ export function createWorkflowSession(options?: {
     nodes: structuredClone(options?.nodes ?? DEFAULT_WORKFLOW_NODES),
     edges: structuredClone(options?.edges ?? DEFAULT_WORKFLOW_EDGES),
     revision: options?.revision ?? null,
+    branchName: options?.branchName ?? 'main',
     isRunning: false,
     runLogs: [],
     selectedNodeId: null,

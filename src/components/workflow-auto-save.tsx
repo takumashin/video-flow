@@ -123,6 +123,7 @@ export default function WorkflowAutoSave() {
           nodes: session.nodes,
           edges: session.edges,
           expectedRevision: session.revision,
+          branchName: session.branchName ?? 'main',
         })
 
         const latestSession = useWorkflowStore.getState().sessions.find(s => s.id === sessionId)

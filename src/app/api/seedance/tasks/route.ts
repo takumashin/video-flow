@@ -24,7 +24,7 @@ import {
   scheduleSeedanceQueueProcessing,
 } from '@/lib/seedance-queue/service'
 import type { SeedanceTaskSubmitPayload } from '@/lib/seedance-queue/types'
-import { resolveImageUrlForApi, resolveMediaUrlForApi } from '@/lib/uploads'
+import { resolveImageUrlForApi, resolveMediaUrlForApi, resolveVideoUrlForApi } from '@/lib/uploads'
 import { saveVideoFromUrl } from '@/lib/video-storage'
 import { authErrorResponse, requireAuth } from '@/lib/auth/context'
 import type {
@@ -132,7 +132,7 @@ export async function POST(request: Request) {
       if (!item?.videoUrl?.trim())
         continue
 
-      const resolvedUrl = await resolveMediaUrlForApi(item.videoUrl, '视频')
+      const resolvedUrl = await resolveVideoUrlForApi(item.videoUrl)
 
       content.push({
         type: 'video_url',
@@ -288,7 +288,7 @@ export async function POST(request: Request) {
 
     let videoUrl = remoteVideoUrl
     try {
-      const saved = await saveVideoFromUrl(remoteVideoUrl, workspaceId, userId, apiTaskId)
+      const saved = await saveVideoFromUrl(remoteVideoUrl, workspaceId, userId, clientTaskId)
       videoUrl = saved.url
     }
     catch (saveError) {

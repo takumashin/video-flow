@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, Sparkles } from 'lucide-react'
+import AnchoredPortalPanel from '@/components/anchored-portal-panel'
 import { cn } from '@/lib/cn'
 import {
   DURATION_MAX,
@@ -11,7 +12,8 @@ import {
   RESOLUTION_OPTIONS,
 } from '@/lib/seedance-params'
 import type { SeedanceVideoRatio, SeedanceVideoResolution } from '@/lib/types'
-import { FieldLabel } from './node-fields'
+import { shouldDisableAudio } from '@/lib/seedance-models'
+import { FieldLabel, NodeTextInput, NodeToggle } from './node-fields'
 
 const RESOLUTION_HINTS: Record<SeedanceVideoResolution, string> = {
   '480p': '标清 · 0.8× 点数 · 适合预览',
@@ -303,5 +305,118 @@ export function SeedanceVideoParams({
         />
       </div>
     </div>
+  )
+}
+
+type CompactVideoParamsTriggerProps = SeedanceVideoParamsProps & {
+  generateAudio: boolean
+  cameraFixed: boolean
+  watermark: boolean
+  seed: number
+  model: string
+  onGenerateAudioChange: (value: boolean) => void
+  onCameraFixedChange: (value: boolean) => void
+  onWatermarkChange: (value: boolean) => void
+  onSeedChange: (value: number) => void
+}
+
+function formatDurationLabel(duration: number) {
+  if (duration === DURATION_SMART)
+    return '智能'
+  return `${duration}S`
+}
+
+export function CompactVideoParamsTrigger({
+  resolution,
+  ratio,
+  duration,
+  onResolutionChange,
+  onRatioChange,
+  onDurationChange,
+  disabled,
+  generateAudio,
+  cameraFixed,
+  watermark,
+  seed,
+  model,
+  onGenerateAudioChange,
+  onCameraFixedChange,
+  onWatermarkChange,
+  onSeedChange,
+}: CompactVideoParamsTriggerProps) {
+  const [open, setOpen] = useState(false)
+
+  const ratioLabel = ratio === 'adaptive' ? '自适应' : ratio
+
+  return (
+    <AnchoredPortalPanel
+      open={open}
+      onClose={() => setOpen(false)}
+      panelClassName="w-72 p-3"
+      trigger={(
+        <button
+          type="button"
+          disabled={disabled}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={() => setOpen(v => !v)}
+          className={cn(
+            'nodrag inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs text-foreground transition hover:bg-surface-muted disabled:opacity-50',
+            open && 'bg-surface-muted',
+          )}
+          title="视频参数"
+        >
+          <span className="inline-flex items-center gap-1 opacity-90">
+            <span className="text-[10px] font-medium">{ratioLabel}</span>
+          </span>
+          <span className="text-muted">/</span>
+          <span>{formatDurationLabel(duration)}</span>
+          <span className="text-muted">/</span>
+          <span className="uppercase">{resolution}</span>
+          <ChevronDown className={cn('ml-0.5 h-3.5 w-3.5 opacity-50', open && 'rotate-180')} />
+        </button>
+      )}
+    >
+      <SeedanceVideoParams
+        resolution={resolution}
+        ratio={ratio}
+        duration={duration}
+        onResolutionChange={onResolutionChange}
+        onRatioChange={onRatioChange}
+        onDurationChange={onDurationChange}
+        disabled={disabled}
+      />
+      <div className="mt-3 space-y-1.5 border-t border-border pt-3">
+        <NodeToggle
+          label="生成音频"
+          checked={generateAudio}
+          onChange={onGenerateAudioChange}
+          disabled={disabled || shouldDisableAudio(model)}
+        />
+        <NodeToggle
+          label="固定镜头"
+          checked={cameraFixed}
+          onChange={onCameraFixedChange}
+          disabled={disabled}
+        />
+        <NodeToggle
+          label="添加水印"
+          checked={watermark}
+          onChange={onWatermarkChange}
+          disabled={disabled}
+        />
+      </div>
+      <div className="mt-2">
+        <FieldLabel>随机种子</FieldLabel>
+        <NodeTextInput
+          value={seed >= 0 ? String(seed) : ''}
+          onChange={v => {
+            const trimmed = v.trim()
+            onSeedChange(trimmed === '' ? -1 : Math.max(0, Math.floor(Number(trimmed) || 0)))
+          }}
+          placeholder="留空为随机"
+          disabled={disabled}
+        />
+      </div>
+    </AnchoredPortalPanel>
   )
 }

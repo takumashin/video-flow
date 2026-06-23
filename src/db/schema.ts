@@ -201,6 +201,35 @@ export const workflows = pgTable('workflow', {
   updatedAt: timestamp('updatedAt', { mode: 'date' }).defaultNow().notNull(),
 })
 
+export type WorkflowBranchStatus = 'active' | 'archived' | 'merged'
+
+export const workflowBranches = pgTable(
+  'workflow_branch',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    workflowId: text('workflowId')
+      .notNull()
+      .references(() => workflows.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    status: text('status').$type<WorkflowBranchStatus>().notNull().default('active'),
+    description: text('description'),
+    sourceVersionId: text('sourceVersionId'),
+    createdBy: text('createdBy').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('createdAt', { mode: 'date' }).defaultNow().notNull(),
+    updatedAt: timestamp('updatedAt', { mode: 'date' }).defaultNow().notNull(),
+    archivedAt: timestamp('archivedAt', { mode: 'date' }),
+    mergedAt: timestamp('mergedAt', { mode: 'date' }),
+  },
+  table => ({
+    workflowNameIdx: uniqueIndex('workflow_branch_workflow_name_idx').on(
+      table.workflowId,
+      table.name,
+    ),
+  }),
+)
+
 export const workflowVersions = pgTable(
   'workflow_version',
   {

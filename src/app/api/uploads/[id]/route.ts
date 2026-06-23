@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { authErrorResponse, requireAuth } from '@/lib/auth/context'
+import { createByteRangeResponse } from '@/lib/http-byte-range'
 import { getMimeTypeFromFilename, moveUploadToFolder, readUpload } from '@/lib/uploads'
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -17,11 +18,9 @@ export async function GET(
 
     const mimeType = getMimeTypeFromFilename(id)
 
-    return new NextResponse(new Uint8Array(file.buffer), {
-      headers: {
-        'Content-Type': mimeType,
-        'Cache-Control': 'public, max-age=31536000, immutable',
-      },
+    return createByteRangeResponse(file.buffer, request, {
+      'Content-Type': mimeType,
+      'Cache-Control': 'public, max-age=31536000, immutable',
     })
   }
   catch (error) {

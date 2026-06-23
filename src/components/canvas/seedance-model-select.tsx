@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
+import AnchoredPortalPanel from '@/components/anchored-portal-panel'
 import { cn } from '@/lib/cn'
 import {
   CUSTOM_MODEL_VALUE,
@@ -29,7 +30,7 @@ type SeedanceModelMenuProps = {
   disabled?: boolean
 }
 
-function SeedanceModelMenu({
+export function SeedanceModelMenu({
   value,
   options,
   onChange,
@@ -251,5 +252,129 @@ export function SeedanceModelSelect({
         )}
       </p>
     </div>
+  )
+}
+
+export function CompactSeedanceModelSelect({
+  mode,
+  model,
+  resolution = '720p',
+  onModelChange,
+  disabled,
+}: SeedanceModelSelectProps) {
+  const availableModels = getModelsForMode(mode)
+  const isCustom = model && !isKnownModelId(model)
+  const selectValue = isCustom ? CUSTOM_MODEL_VALUE : (model || getDefaultModelForMode(mode))
+
+  const menuOptions: ModelMenuOption[] = [
+    ...availableModels.map(item => ({
+      value: item.id,
+      label: item.label,
+      description: item.description,
+      creditCost: getSeedanceGenerationCreditCost(item.id, resolution),
+    })),
+    {
+      value: CUSTOM_MODEL_VALUE,
+      label: '自定义 Endpoint ID',
+      description: '火山方舟控制台创建的推理接入点（ep- 开头）',
+    },
+  ]
+
+  const handleSelectChange = (value: string) => {
+    if (value === CUSTOM_MODEL_VALUE) {
+      if (!isCustom)
+        onModelChange('', !shouldDisableAudio(''))
+      return
+    }
+
+    const option = getModelOption(value)
+    onModelChange(value, option?.supportsAudio ?? false)
+  }
+
+  return (
+    <div className="min-w-[8rem] shrink-0">
+      <CompactModelTrigger
+        value={selectValue}
+        options={menuOptions}
+        onChange={handleSelectChange}
+        disabled={disabled}
+      />
+      {isCustom && (
+        <div className="mt-1.5 w-40">
+          <NodeTextInput
+            value={model}
+            onChange={value => onModelChange(value, !shouldDisableAudio(value))}
+            placeholder="ep-xxxxxxxx"
+            disabled={disabled}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CompactModelTrigger({
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  value: string
+  options: ModelMenuOption[]
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const selected = options.find(option => option.value === value)
+
+  return (
+    <AnchoredPortalPanel
+      open={open}
+      onClose={() => setOpen(false)}
+      panelClassName="w-64 overflow-hidden p-0"
+      trigger={(
+        <button
+          type="button"
+          disabled={disabled}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={() => setOpen(v => !v)}
+          className={cn(
+            'nodrag inline-flex h-8 max-w-[10rem] items-center gap-1 rounded-lg px-2.5 text-xs font-medium text-foreground transition',
+            'hover:bg-surface-muted disabled:opacity-50',
+            open && 'bg-surface-muted',
+          )}
+          title="模型"
+        >
+          <span className="truncate">{selected?.label ?? '选择模型'}</span>
+          <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 opacity-50', open && 'rotate-180')} />
+        </button>
+      )}
+    >
+      <ul className="max-h-56 overflow-y-auto py-1">
+        {options.map(option => {
+          const active = option.value === value
+          return (
+            <li key={option.value}>
+              <button
+                type="button"
+                className={cn(
+                  'flex w-full items-start gap-2 px-2.5 py-2 text-left text-xs transition',
+                  active ? 'bg-primary/10 text-primary-light' : 'hover:bg-surface-muted',
+                )}
+                onClick={() => {
+                  onChange(option.value)
+                  setOpen(false)
+                }}
+              >
+                <span className="min-w-0 flex-1 font-medium">{option.label}</span>
+                {option.creditCost != null && (
+                  <span className="shrink-0 text-[10px] text-muted">{option.creditCost} 点</span>
+                )}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </AnchoredPortalPanel>
   )
 }

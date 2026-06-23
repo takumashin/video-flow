@@ -5,6 +5,8 @@ import { and, desc, eq, isNull, or } from 'drizzle-orm'
 import { db } from '@/db'
 import { assets } from '@/db/schema'
 import { getAssetFolderById } from '@/lib/asset-folders/service'
+import { extractVideoId } from '@/lib/video-url'
+import { getRemoteVideoUrlForLocalVideo } from '@/lib/video-storage'
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'data', 'uploads')
 
@@ -279,6 +281,31 @@ export function extractUploadId(imageUrl: string): string | null {
 
 export async function resolveImageUrlForApi(imageUrl: string): Promise<string> {
   return resolveMediaUrlForApi(imageUrl, '图片')
+}
+
+/** Seedance reference_video 仅接受公网 HTTPS URL，不能使用 data URL 或需登录的本地地址 */
+export async function resolveVideoUrlForApi(videoUrl: string): Promise<string> {
+  const trimmed = videoUrl.trim()
+
+  if (!trimmed)
+    throw new Error('视频地址为空')
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://'))
+    return trimmed
+
+  const videoId = extractVideoId(trimmed)
+  if (videoId) {
+    const remoteUrl = await getRemoteVideoUrlForLocalVideo(videoId)
+    if (remoteUrl)
+      return remoteUrl
+    throw new Error('无法解析本地视频的远程地址，请重新生成该视频后再作为参考（远程链接 24 小时内有效）')
+  }
+
+  if (extractUploadId(trimmed)) {
+    throw new Error('本地上传的参考视频暂不支持提交，请使用 Seedance 生成的视频或公网可访问的视频 URL')
+  }
+
+  throw new Error('无效的视频地址')
 }
 
 export async function resolveMediaUrlForApi(mediaUrl: string, label = '媒体'): Promise<string> {

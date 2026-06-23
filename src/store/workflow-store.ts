@@ -8,7 +8,7 @@ import {
 import { v4 as uuidv4 } from 'uuid'
 import type { ImageRole, RunLogEntry, SeedanceGenerationMode, SeedanceNodeData, SeedanceTaskListItem, SeedanceTaskStatus, VideoHistoryItem, WorkflowEdge, WorkflowNode, WorkflowNodeData } from '@/lib/types'
 import { NodeType } from '@/lib/types'
-import { pruneSeedanceUpstreamEdges, validateSeedanceConnection, applySeedanceImageRolesForMode, normalizeWorkflowImageRoles, resolveSeedanceModeForConnection } from '@/lib/seedance-connection-rules'
+import { pruneSeedanceUpstreamEdges, validateSeedanceConnection, applySeedanceImageRolesForMode, normalizeWorkflowImageRoles, resolveSeedanceModeForConnection, countUpstreamImageConnections, countUpstreamVideoConnections, countUpstreamAudioConnections, getSeedanceModeInputRules } from '@/lib/seedance-connection-rules'
 import { buildConnectionForNewNode, inferSeedanceGenerationModeForNewNode, type ConnectHandleSide } from '@/lib/connect-node-options'
 import { DEFAULT_SEEDANCE_MODEL_ID, getRecommendedModelForModeChange, shouldDisableAudio } from '@/lib/seedance-models'
 import {
@@ -62,7 +62,7 @@ type WorkflowStore = {
     nodes: WorkflowNode[]
     edges: WorkflowEdge[]
     revision?: number | null
-  }, options?: { newTab?: boolean }) => void
+  }, options?: { newTab?: boolean; branchName?: string }) => void
   newWorkflow: () => void
   addSession: () => string
   closeSession: (sessionId: string) => void
@@ -80,6 +80,8 @@ type WorkflowStore = {
   pruneSeedanceEdgesForMode: (nodeId: string, mode: SeedanceGenerationMode) => void
   disconnectUpstreamImage: (seedanceNodeId: string, imageNodeId: string) => void
   setSeedanceFrameImage: (seedanceNodeId: string, role: ImageRole, imageUrl: string) => void
+  addSeedanceOmniMedia: (seedanceNodeId: string, kind: 'image' | 'video' | 'audio', mediaUrl: string) => void
+  useSeedanceVideoAsReference: (seedanceNodeId: string, videoUrl?: string) => void
   disconnectUpstreamVideo: (seedanceNodeId: string, videoNodeId: string) => void
   disconnectUpstreamAudio: (seedanceNodeId: string, audioNodeId: string) => void
   addNode: (type: NodeType, position?: { x: number; y: number }) => void
@@ -898,6 +900,7 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()((set, get) => ({
             workflowId: workflow.id ?? null,
             name: workflow.name,
             revision: workflow.revision ?? session.revision,
+            branchName: options?.branchName ?? session.branchName ?? 'main',
             selectedNodeId: null,
             videoHistoryModalNodeId: null,
             runLogs: [],
@@ -921,6 +924,7 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()((set, get) => ({
             nodes,
             edges,
             revision: workflow.revision ?? null,
+            branchName: options?.branchName ?? 'main',
           })
           set(state => ({
             sessions: [...state.sessions, session],
@@ -1245,16 +1249,16 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()((set, get) => ({
 
         const mode = seedanceNode.data.generationMode ?? 'text_to_video'
         const orderedImages = getOrderedUpstreamImageNodes(seedanceNodeId, session.nodes, session.edges)
-        const slotIndex = role === 'first_frame' ? 0 : 1
-        const existingNode = orderedImages[slotIndex]
+        const existingNode = orderedImages.find(
+          node => node.data.type === NodeType.ImageInput && node.data.role === role,
+        )
 
         if (existingNode) {
-          let nextNodes = session.nodes.map(node =>
+          const nextNodes = session.nodes.map(node =>
             node.id === existingNode.id && node.data.type === NodeType.ImageInput
               ? { ...node, data: { ...node.data, imageUrl, role } }
               : node,
           )
-          nextNodes = applySeedanceImageRolesForMode(seedanceNodeId, mode, nextNodes, session.edges)
           get().patchSession(activeSessionId, s => ({ ...s, nodes: nextNodes }))
           return
         }
@@ -1295,6 +1299,162 @@ export const useWorkflowStore = create<WorkflowStoreInternal>()((set, get) => ({
           nodes: result.nodes,
           edges: result.edges,
         }))
+      },
+
+      addSeedanceOmniMedia: (seedanceNodeId, kind, mediaUrl) => {
+        const { activeSessionId } = get()
+        const session = getActiveSession(get())
+        if (!session)
+          return
+
+        const seedanceNode = session.nodes.find(n => n.id === seedanceNodeId)
+        if (!seedanceNode || seedanceNode.data.type !== NodeType.Seedance)
+          return
+
+        const mode = seedanceNode.data.generationMode ?? 'text_to_video'
+        const rules = getSeedanceModeInputRules(mode)
+        const seedancePos = seedanceNode.position
+
+        if (kind === 'image' && !rules.allowImages)
+          return
+        if (kind === 'video' && !rules.allowVideos)
+          return
+        if (kind === 'audio' && !rules.allowAudios)
+          return
+
+        const imageCount = countUpstreamImageConnections(seedanceNodeId, session.nodes, session.edges)
+        const videoCount = countUpstreamVideoConnections(seedanceNodeId, session.nodes, session.edges)
+        const audioCount = countUpstreamAudioConnections(seedanceNodeId, session.nodes, session.edges)
+
+        if (kind === 'image' && imageCount >= rules.maxImages)
+          return
+        if (kind === 'video' && videoCount >= rules.maxVideos)
+          return
+        if (kind === 'audio' && audioCount >= rules.maxAudios)
+          return
+
+        const stackIndex = imageCount + videoCount + audioCount
+        const position = {
+          x: seedancePos.x - 320,
+          y: seedancePos.y + stackIndex * 72,
+        }
+
+        let newNode: WorkflowNode
+        if (kind === 'image') {
+          newNode = createWorkflowNode(NodeType.ImageInput, session, position)
+          newNode.data = {
+            ...newNode.data,
+            type: NodeType.ImageInput,
+            imageUrl: mediaUrl,
+            role: mode === 'omni_reference' ? 'reference_image' : 'first_frame',
+          } as typeof newNode.data
+        }
+        else if (kind === 'video') {
+          newNode = createWorkflowNode(NodeType.VideoInput, session, position)
+          newNode.data = {
+            ...newNode.data,
+            type: NodeType.VideoInput,
+            mediaUrl,
+          } as typeof newNode.data
+        }
+        else {
+          newNode = createWorkflowNode(NodeType.AudioInput, session, position)
+          newNode.data = {
+            ...newNode.data,
+            type: NodeType.AudioInput,
+            mediaUrl,
+          } as typeof newNode.data
+        }
+
+        const connection: Connection = {
+          source: newNode.id,
+          target: seedanceNodeId,
+          sourceHandle: null,
+          targetHandle: null,
+        }
+
+        const result = applyWorkflowConnection(
+          connection,
+          [...session.nodes, newNode],
+          session.edges,
+          entry => get().addLogForSession(activeSessionId, entry),
+        )
+        if (!result)
+          return
+
+        get().patchSession(activeSessionId, s => ({
+          ...s,
+          nodes: result.nodes,
+          edges: result.edges,
+        }))
+      },
+
+      useSeedanceVideoAsReference: (seedanceNodeId, videoUrl) => {
+        const { activeSessionId } = get()
+        const session = getActiveSession(get())
+        if (!session)
+          return
+
+        const seedanceNode = session.nodes.find(n => n.id === seedanceNodeId)
+        if (!seedanceNode || seedanceNode.data.type !== NodeType.Seedance)
+          return
+
+        const data = seedanceNode.data
+        const url = (videoUrl ?? data.videoUrl ?? data.videoHistory?.[0]?.videoUrl)?.trim()
+        if (!url) {
+          get().addLogForSession(activeSessionId, {
+            nodeId: seedanceNodeId,
+            nodeTitle: data.title,
+            message: '暂无可用视频，请先生成后再设为参考',
+            level: 'error',
+          })
+          return
+        }
+
+        const refs = getSeedanceUpstreamRefs(seedanceNodeId, session.nodes, session.edges)
+        if (refs.videos.some(video => video.mediaUrl === url)) {
+          get().addLogForSession(activeSessionId, {
+            nodeId: seedanceNodeId,
+            nodeTitle: data.title,
+            message: '该视频已在参考列表中',
+            level: 'info',
+          })
+          return
+        }
+
+        const currentMode = data.generationMode ?? 'text_to_video'
+        if (currentMode !== 'omni_reference') {
+          const nextModel = getRecommendedModelForModeChange('omni_reference', data.model)
+          get().updateNodeDataForSession(activeSessionId, seedanceNodeId, {
+            generationMode: 'omni_reference',
+            model: nextModel,
+            generateAudio: shouldDisableAudio(nextModel) ? false : data.generateAudio,
+          })
+          get().pruneSeedanceEdgesForMode(seedanceNodeId, 'omni_reference')
+        }
+
+        const refreshed = getActiveSession(get())
+        if (!refreshed)
+          return
+
+        const videoCount = countUpstreamVideoConnections(seedanceNodeId, refreshed.nodes, refreshed.edges)
+        if (videoCount >= getSeedanceModeInputRules('omni_reference').maxVideos) {
+          get().addLogForSession(activeSessionId, {
+            nodeId: seedanceNodeId,
+            nodeTitle: data.title,
+            message: '参考视频已达上限（3 个），请先移除后再添加',
+            level: 'error',
+          })
+          return
+        }
+
+        get().addSeedanceOmniMedia(seedanceNodeId, 'video', url)
+        get().addLogForSession(activeSessionId, {
+          nodeId: seedanceNodeId,
+          nodeTitle: data.title,
+          message: '已将生成视频添加为参考，可在描述中使用 @视频 引用后继续生成',
+          level: 'success',
+        })
       },
 
       disconnectUpstreamVideo: (seedanceNodeId, videoNodeId) => {

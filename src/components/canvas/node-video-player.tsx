@@ -14,6 +14,8 @@ type NodeVideoPlayerProps = {
   previewTitle?: string
   showScreenshot?: boolean
   showExpand?: boolean
+  /** 画布节点内嵌：精简底栏、无时间文字 */
+  variant?: 'default' | 'node'
 }
 
 export default function NodeVideoPlayer({
@@ -23,7 +25,9 @@ export default function NodeVideoPlayer({
   previewTitle = '视频预览',
   showScreenshot = true,
   showExpand = true,
+  variant = 'default',
 }: NodeVideoPlayerProps) {
+  const isNode = variant === 'node'
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -138,11 +142,12 @@ export default function NodeVideoPlayer({
   return (
     <div
       className={cn(
-        'node-inner relative aspect-video min-h-[180px] overflow-hidden rounded-md bg-black',
+        'node-inner relative overflow-hidden bg-black',
+        isNode ? 'h-full min-h-0' : 'aspect-video min-h-[180px] rounded-md',
         className,
       )}
-      onPointerDown={e => e.stopPropagation()}
-      onClick={e => e.stopPropagation()}
+      onPointerDown={isNode ? undefined : e => e.stopPropagation()}
+      onClick={isNode ? undefined : e => e.stopPropagation()}
     >
       <video
         ref={videoRef}
@@ -154,8 +159,9 @@ export default function NodeVideoPlayer({
         className={cn(
           'node-media absolute inset-0 h-full w-full bg-black object-contain',
           showFramePoster && 'opacity-0',
+          isNode && 'pointer-events-none',
         )}
-        onClick={togglePlay}
+        onClick={isNode ? undefined : togglePlay}
       />
 
       {showFramePoster && (
@@ -169,30 +175,56 @@ export default function NodeVideoPlayer({
       )}
 
       {!playing && (
-        <button
-          type="button"
-          className="nodrag absolute inset-0 flex items-center justify-center bg-black/25 transition hover:bg-black/35"
-          onClick={e => {
-            e.stopPropagation()
-            togglePlay()
-          }}
-          aria-label="播放"
-        >
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg ring-1 ring-white/20 backdrop-blur-sm">
-            <Play className="h-4 w-4 fill-current" />
-          </span>
-        </button>
+        isNode
+          ? (
+              <button
+                type="button"
+                className="nodrag pointer-events-auto absolute left-1/2 top-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  togglePlay()
+                }}
+                onPointerDown={e => e.stopPropagation()}
+                aria-label="播放"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white shadow-lg ring-1 ring-white/20 backdrop-blur-sm transition hover:bg-black/70">
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                </span>
+              </button>
+            )
+          : (
+              <button
+                type="button"
+                className="nodrag absolute inset-0 flex items-center justify-center bg-black/20 transition hover:bg-black/30"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  togglePlay()
+                }}
+                aria-label="播放"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg ring-1 ring-white/20 backdrop-blur-sm">
+                  <Play className="h-4 w-4 fill-current" />
+                </span>
+              </button>
+            )
       )}
 
       <div
-        className="nodrag absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-2 pb-2 pt-8"
-        onPointerDown={e => e.stopPropagation()}
+        className={cn(
+          'absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent',
+          isNode ? 'pointer-events-none px-1.5 pb-1.5 pt-6' : 'nodrag px-2 pb-2 pt-8',
+        )}
+        onPointerDown={isNode ? undefined : e => e.stopPropagation()}
       >
-        <div className="flex items-center gap-1.5">
+        <div className={cn('flex items-center gap-1', isNode && 'pointer-events-auto')}>
           <button
             type="button"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
-            onClick={togglePlay}
+            className="nodrag flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
+            onClick={(e) => {
+              e.stopPropagation()
+              togglePlay()
+            }}
+            onPointerDown={e => e.stopPropagation()}
             aria-label={playing ? '暂停' : '播放'}
           >
             {playing
@@ -200,13 +232,18 @@ export default function NodeVideoPlayer({
               : <Play className="h-2.5 w-2.5 fill-current" />}
           </button>
 
-          <span className="shrink-0 text-[10px] tabular-nums text-white/85">
-            {formatMediaTime(currentTime)}
-          </span>
+          {!isNode && (
+            <span className="shrink-0 text-[10px] tabular-nums text-white/85">
+              {formatMediaTime(currentTime)}
+            </span>
+          )}
 
           <div
-            className="nodrag relative h-1.5 min-w-0 flex-1 cursor-pointer rounded-full bg-white/25"
-            onPointerDown={onTrackPointerDown}
+            className="nodrag relative h-1 min-w-0 flex-1 cursor-pointer rounded-full bg-white/20"
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              onTrackPointerDown(e)
+            }}
             role="slider"
             aria-label="播放进度"
             aria-valuemin={0}
@@ -214,39 +251,43 @@ export default function NodeVideoPlayer({
             aria-valuenow={currentTime}
           >
             <div
-              className="absolute inset-y-0 left-0 rounded-full bg-primary-light"
+              className="absolute inset-y-0 left-0 rounded-full bg-white/70"
               style={{ width: `${progress}%` }}
             />
           </div>
 
           <div
-            className="relative flex items-center"
-            onMouseEnter={() => setShowVolumeSlider(true)}
-            onMouseLeave={() => setShowVolumeSlider(false)}
+            className={cn('relative flex items-center gap-0.5', isNode && 'nodrag')}
+            onMouseEnter={() => !isNode && setShowVolumeSlider(true)}
+            onMouseLeave={() => !isNode && setShowVolumeSlider(false)}
           >
-            {showVolumeSlider && (
-              <div className="nodrag absolute bottom-full right-0 mb-1 rounded-md bg-black/80 px-2 py-1.5 shadow-lg">
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.02}
-                  value={muted ? 0 : volume}
-                  onChange={e => {
-                    const v = Number(e.target.value)
-                    setVolume(v)
-                    if (v > 0)
-                      setMuted(false)
-                  }}
-                  className="nodrag h-1 w-16 cursor-pointer accent-primary-light"
-                  aria-label="音量"
-                />
-              </div>
+            {(isNode || showVolumeSlider) && (
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.02}
+                value={muted ? 0 : volume}
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  setVolume(v)
+                  if (v > 0) setMuted(false)
+                }}
+                className={cn(
+                  'nodrag cursor-pointer accent-white',
+                  isNode ? 'h-1 w-10' : 'h-1 w-16',
+                )}
+                aria-label="音量"
+              />
             )}
             <button
               type="button"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
-              onClick={toggleMute}
+              className="nodrag flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleMute()
+              }}
+              onPointerDown={e => e.stopPropagation()}
               aria-label={muted ? '取消静音' : '静音'}
             >
               {muted || volume === 0
@@ -255,7 +296,7 @@ export default function NodeVideoPlayer({
             </button>
           </div>
 
-          {showExpand && (
+          {showExpand && !isNode && (
             <MediaPreviewExpandButton
               kind="video"
               url={src}
@@ -267,8 +308,12 @@ export default function NodeVideoPlayer({
           {showScreenshot && (
             <button
               type="button"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
-              onClick={captureScreenshot}
+              className="nodrag flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
+              onClick={(e) => {
+                e.stopPropagation()
+                captureScreenshot()
+              }}
+              onPointerDown={e => e.stopPropagation()}
               title="截图"
               aria-label="截图"
             >

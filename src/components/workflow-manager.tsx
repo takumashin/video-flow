@@ -101,7 +101,6 @@ export default function WorkflowManager({
   const panelRef = useRef<HTMLDivElement>(null)
 
   const activeSession = useActiveWorkflowSession()
-  const sessions = useWorkflowStore(s => s.sessions)
   const isRunning = activeSession?.isRunning ?? false
   const workflowId = activeSession?.workflowId ?? null
   const workflowName = activeSession?.name ?? ''
@@ -421,7 +420,7 @@ export default function WorkflowManager({
                           key={item.id}
                           className={cn(
                             'mb-1 flex items-center gap-2 rounded-lg border px-2 py-2',
-                            sessions.some(session => session.workflowId === item.id)
+                            workflowId === item.id
                               ? 'border-primary-light bg-primary/10'
                               : 'border-transparent hover:bg-surface-muted',
                           )}

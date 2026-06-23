@@ -118,6 +118,7 @@ export function inferSeedanceGenerationModeForNewNode(
         return 'image_to_video'
       case NodeType.VideoInput:
       case NodeType.AudioInput:
+      case NodeType.Seedance:
         return 'omni_reference'
       case NodeType.TextPrompt:
       case NodeType.Start:
@@ -146,8 +147,13 @@ export function getConnectableNodeTypes(
       case NodeType.VideoInput:
       case NodeType.AudioInput:
         return [NodeType.Seedance]
-      case NodeType.Seedance:
-        return []
+      case NodeType.Seedance: {
+        const hasVideo = Boolean(
+          node.data.type === NodeType.Seedance
+          && (node.data.videoUrl || (node.data.videoHistory && node.data.videoHistory.length > 0)),
+        )
+        return hasVideo ? [NodeType.Seedance] : []
+      }
       default:
         return []
     }

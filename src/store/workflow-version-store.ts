@@ -1,23 +1,30 @@
 import { create } from 'zustand'
-import type { WorkflowBranch, WorkflowDiffResult, WorkflowVersionSummary } from '@/lib/types'
+import type { WorkflowBranch, WorkflowBranchStatus, WorkflowDiffResult, WorkflowEdge, WorkflowNode, WorkflowVersionSummary } from '@/lib/types'
 import {
+  archiveWorkflowBranch,
+  checkoutWorkflowBranch,
   createWorkflowBranch,
   fetchBranches,
   fetchVersionDiff,
   fetchWorkflowVersions,
+  mergeWorkflowBranch,
+  renameWorkflowBranch,
+  restoreWorkflowBranch,
   restoreWorkflowVersion,
   saveNamedVersion,
 } from '@/lib/workflow-version-api'
 
 type WorkflowVersionStore = {
-  // Panel/dialog state
   versionPanelOpen: boolean
+  branchesModalOpen: boolean
+  mergeModalOpen: boolean
+  mergeTargetBranch: string | null
   diffViewerOpen: boolean
   saveDialogOpen: boolean
   selectedForCompare: string | null
   activeBranch: string
+  branchTab: 'active' | 'mine' | 'archived'
 
-  // Data cache
   versions: WorkflowVersionSummary[]
   branches: WorkflowBranch[]
   diffResult: WorkflowDiffResult | null
@@ -26,34 +33,53 @@ type WorkflowVersionStore = {
   actionLoading: boolean
   error: string | null
 
-  // Actions
   openVersionPanel: () => void
   closeVersionPanel: () => void
+  openBranchesModal: () => void
+  closeBranchesModal: () => void
+  openMergeModal: (branchName: string) => void
+  closeMergeModal: () => void
   openSaveDialog: () => void
   closeSaveDialog: () => void
   openDiffViewer: (versionA: string, versionB: string, workflowId: string) => Promise<void>
   closeDiffViewer: () => void
   selectForCompare: (versionId: string | null) => void
   setActiveBranch: (branch: string) => void
+  setBranchTab: (tab: 'active' | 'mine' | 'archived') => void
 
   loadVersions: (workflowId: string) => Promise<void>
-  loadBranches: (workflowId: string) => Promise<void>
+  loadBranches: (workflowId: string, options?: { status?: WorkflowBranchStatus | 'all'; mine?: boolean }) => Promise<void>
   loadDiff: (workflowId: string, v1: string, v2: string) => Promise<void>
 
   saveNamedVersion: (workflowId: string, label: string, description?: string) => Promise<void>
   restoreVersion: (workflowId: string, versionId: string) => Promise<boolean>
-  createBranch: (workflowId: string, name: string, sourceVersionId: string) => Promise<void>
+  createBranch: (workflowId: string, name: string, description?: string, sourceVersionId?: string) => Promise<WorkflowBranch | null>
+  checkoutBranch: (
+    workflowId: string,
+    sessionId: string,
+    targetBranch: string,
+    currentState: { name: string; nodes: unknown[]; edges: unknown[]; revision: number },
+  ) => Promise<boolean>
+  mergeBranch: (workflowId: string, sessionId: string, branchName: string) => Promise<boolean>
+  archiveBranch: (workflowId: string, branchName: string) => Promise<boolean>
+  restoreBranch: (workflowId: string, branchName: string) => Promise<boolean>
+  renameBranch: (workflowId: string, oldName: string, newName: string) => Promise<boolean>
 
+  resetForWorkflow: (workflowId: string | null) => void
   clearError: () => void
   reset: () => void
 }
 
 export const useWorkflowVersionStore = create<WorkflowVersionStore>((set, get) => ({
   versionPanelOpen: false,
+  branchesModalOpen: false,
+  mergeModalOpen: false,
+  mergeTargetBranch: null,
   diffViewerOpen: false,
   saveDialogOpen: false,
   selectedForCompare: null,
   activeBranch: 'main',
+  branchTab: 'active',
 
   versions: [],
   branches: [],
@@ -65,6 +91,10 @@ export const useWorkflowVersionStore = create<WorkflowVersionStore>((set, get) =
 
   openVersionPanel: () => set({ versionPanelOpen: true, selectedForCompare: null }),
   closeVersionPanel: () => set({ versionPanelOpen: false, selectedForCompare: null }),
+  openBranchesModal: () => set({ branchesModalOpen: true, error: null }),
+  closeBranchesModal: () => set({ branchesModalOpen: false }),
+  openMergeModal: branchName => set({ mergeModalOpen: true, mergeTargetBranch: branchName, error: null }),
+  closeMergeModal: () => set({ mergeModalOpen: false, mergeTargetBranch: null }),
   openSaveDialog: () => set({ saveDialogOpen: true }),
   closeSaveDialog: () => set({ saveDialogOpen: false }),
 
@@ -84,8 +114,8 @@ export const useWorkflowVersionStore = create<WorkflowVersionStore>((set, get) =
   closeDiffViewer: () => set({ diffViewerOpen: false, diffResult: null }),
 
   selectForCompare: versionId => set({ selectedForCompare: versionId }),
-
   setActiveBranch: branch => set({ activeBranch: branch }),
+  setBranchTab: tab => set({ branchTab: tab }),
 
   loadVersions: async (workflowId) => {
     set({ versionsLoading: true, error: null })
@@ -102,13 +132,14 @@ export const useWorkflowVersionStore = create<WorkflowVersionStore>((set, get) =
     }
   },
 
-  loadBranches: async (workflowId) => {
+  loadBranches: async (workflowId, options) => {
+    set({ error: null })
     try {
-      const branches = await fetchBranches(workflowId)
+      const branches = await fetchBranches(workflowId, options)
       set({ branches })
     }
-    catch (_err) {
-      // Branches are non-critical; silently fail
+    catch (err) {
+      set({ error: err instanceof Error ? err.message : '加载分支列表失败' })
     }
   },
 
@@ -129,8 +160,7 @@ export const useWorkflowVersionStore = create<WorkflowVersionStore>((set, get) =
   saveNamedVersion: async (workflowId, label, description) => {
     set({ actionLoading: true, error: null })
     try {
-      await saveNamedVersion(workflowId, label, description)
-      // Reload versions after saving
+      await saveNamedVersion(workflowId, label, description, get().activeBranch)
       await get().loadVersions(workflowId)
       set({ actionLoading: false, saveDialogOpen: false })
     }
@@ -158,28 +188,164 @@ export const useWorkflowVersionStore = create<WorkflowVersionStore>((set, get) =
     }
   },
 
-  createBranch: async (workflowId, name, sourceVersionId) => {
+  createBranch: async (workflowId, name, description, sourceVersionId) => {
     set({ actionLoading: true, error: null })
     try {
-      await createWorkflowBranch(workflowId, name, sourceVersionId)
+      const branch = await createWorkflowBranch(workflowId, name, { description, sourceVersionId })
       await get().loadBranches(workflowId)
       set({ actionLoading: false })
+      return branch
     }
     catch (err) {
       set({
         error: err instanceof Error ? err.message : '创建分支失败',
         actionLoading: false,
       })
+      return null
     }
+  },
+
+  checkoutBranch: async (workflowId, sessionId, targetBranch, currentState) => {
+    const fromBranch = get().activeBranch
+    if (fromBranch === targetBranch)
+      return true
+
+    set({ actionLoading: true, error: null })
+    try {
+      const result = await checkoutWorkflowBranch(
+        workflowId,
+        targetBranch,
+        fromBranch,
+        currentState,
+      )
+
+      const { useWorkflowStore } = await import('@/store/workflow-store')
+      useWorkflowStore.getState().applyWorkflow({
+        id: result.id,
+        name: result.name,
+        nodes: result.nodes as WorkflowNode[],
+        edges: result.edges as WorkflowEdge[],
+        revision: result.revision,
+      }, { newTab: false, branchName: result.branchName })
+
+      set({ activeBranch: targetBranch, actionLoading: false })
+      return true
+    }
+    catch (err) {
+      set({
+        error: err instanceof Error ? err.message : '切换分支失败',
+        actionLoading: false,
+      })
+      return false
+    }
+  },
+
+  mergeBranch: async (workflowId, sessionId, branchName) => {
+    set({ actionLoading: true, error: null })
+    try {
+      const result = await mergeWorkflowBranch(workflowId, branchName)
+      const { useWorkflowStore } = await import('@/store/workflow-store')
+      useWorkflowStore.getState().applyWorkflow({
+        id: result.workflow.id,
+        name: result.workflow.name,
+        nodes: result.workflow.nodes as WorkflowNode[],
+        edges: result.workflow.edges as WorkflowEdge[],
+        revision: result.workflow.revision,
+      }, { newTab: false, branchName: 'main' })
+
+      set({
+        activeBranch: 'main',
+        actionLoading: false,
+        mergeModalOpen: false,
+        mergeTargetBranch: null,
+      })
+      await get().loadBranches(workflowId)
+      return true
+    }
+    catch (err) {
+      set({
+        error: err instanceof Error ? err.message : '合并分支失败',
+        actionLoading: false,
+      })
+      return false
+    }
+  },
+
+  archiveBranch: async (workflowId, branchName) => {
+    set({ actionLoading: true, error: null })
+    try {
+      await archiveWorkflowBranch(workflowId, branchName)
+      await get().loadBranches(workflowId)
+      set({ actionLoading: false })
+      return true
+    }
+    catch (err) {
+      set({
+        error: err instanceof Error ? err.message : '归档分支失败',
+        actionLoading: false,
+      })
+      return false
+    }
+  },
+
+  restoreBranch: async (workflowId, branchName) => {
+    set({ actionLoading: true, error: null })
+    try {
+      await restoreWorkflowBranch(workflowId, branchName)
+      await get().loadBranches(workflowId)
+      set({ actionLoading: false })
+      return true
+    }
+    catch (err) {
+      set({
+        error: err instanceof Error ? err.message : '恢复分支失败',
+        actionLoading: false,
+      })
+      return false
+    }
+  },
+
+  renameBranch: async (workflowId, oldName, newName) => {
+    set({ actionLoading: true, error: null })
+    try {
+      await renameWorkflowBranch(workflowId, oldName, newName)
+      if (get().activeBranch === oldName)
+        set({ activeBranch: newName })
+      await get().loadBranches(workflowId)
+      set({ actionLoading: false })
+      return true
+    }
+    catch (err) {
+      set({
+        error: err instanceof Error ? err.message : '重命名分支失败',
+        actionLoading: false,
+      })
+      return false
+    }
+  },
+
+  resetForWorkflow: () => {
+    set({
+      activeBranch: 'main',
+      branchTab: 'active',
+      versions: [],
+      branches: [],
+      selectedForCompare: null,
+      error: null,
+    })
   },
 
   clearError: () => set({ error: null }),
   reset: () => set({
     versionPanelOpen: false,
+    branchesModalOpen: false,
+    mergeModalOpen: false,
+    mergeTargetBranch: null,
     diffViewerOpen: false,
     saveDialogOpen: false,
     selectedForCompare: null,
     activeBranch: 'main',
+    branchTab: 'active',
     versions: [],
     branches: [],
     diffResult: null,

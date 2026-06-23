@@ -3,7 +3,6 @@ import { db } from '@/db'
 import { workflowVersions, workflows, users } from '@/db/schema'
 import { computeWorkflowDiff } from './workflow-diff'
 import type {
-  WorkflowBranch,
   WorkflowDiffResult,
   WorkflowEdge,
   WorkflowNode,
@@ -208,6 +207,7 @@ export async function createNamedVersion(
   userId: string,
   label: string,
   description?: string,
+  branchName: string = 'main',
 ): Promise<WorkflowVersionSummary> {
   // Read current workflow state
   const [workflow] = await db
@@ -221,7 +221,7 @@ export async function createNamedVersion(
   return createWorkflowVersion({
     workflowId,
     revision: workflow.revision,
-    branchName: 'main',
+    branchName,
     nodes: workflow.nodes as WorkflowNode[],
     edges: workflow.edges as WorkflowEdge[],
     name: workflow.name,
@@ -283,99 +283,6 @@ export async function restoreVersion(
     edges: updated.edges as WorkflowEdge[],
     revision: updated.revision,
     updatedAt: updated.updatedAt.getTime(),
-  }
-}
-
-// ---- Branches ----
-
-export async function listBranches(
-  workflowId: string,
-): Promise<WorkflowBranch[]> {
-  const rows = await db
-    .selectDistinct({
-      branchName: workflowVersions.branchName,
-    })
-    .from(workflowVersions)
-    .where(eq(workflowVersions.workflowId, workflowId))
-
-  // Always include 'main' even if no versions yet
-  const branchNames = new Set(rows.map(r => r.branchName))
-  if (!branchNames.has('main')) branchNames.add('main')
-
-  const branches: WorkflowBranch[] = []
-
-  for (const name of branchNames) {
-    const latest = await getLatestVersionForBranch(workflowId, name)
-    if (latest) {
-      branches.push({
-        name,
-        latestRevision: latest.revision,
-        latestVersionId: latest.id,
-        createdAt: latest.createdAt,
-        createdBy: latest.createdBy,
-        createdByName: latest.createdByName,
-      })
-    }
-    else {
-      branches.push({
-        name,
-        latestRevision: 0,
-        latestVersionId: '',
-        createdAt: 0,
-        createdBy: null,
-        createdByName: null,
-      })
-    }
-  }
-
-  branches.sort((a, b) => b.createdAt - a.createdAt)
-  return branches
-}
-
-export async function createBranch(
-  workflowId: string,
-  branchName: string,
-  sourceVersionId: string,
-  userId: string,
-): Promise<WorkflowBranch> {
-  // Validate branch name
-  const normalized = branchName.trim()
-  if (!normalized || normalized === 'main') {
-    throw new Error('分支名称无效')
-  }
-
-  // Load source version
-  const sourceVersion = await getWorkflowVersion(sourceVersionId)
-  if (!sourceVersion || sourceVersion.workflowId !== workflowId) {
-    throw new Error('源版本不存在')
-  }
-
-  // Check if branch already exists
-  const existing = await getLatestVersionForBranch(workflowId, normalized)
-  if (existing) {
-    throw new Error(`分支 "${normalized}" 已存在`)
-  }
-
-  // Create the first version on the new branch (a copy of the source version)
-  const newVersion = await createWorkflowVersion({
-    workflowId,
-    revision: 1, // branch starts at revision 1
-    branchName: normalized,
-    nodes: sourceVersion.nodes,
-    edges: sourceVersion.edges,
-    name: `${sourceVersion.name} (${normalized})`,
-    label: `Branch from ${sourceVersion.label || `r${sourceVersion.revision}`}`,
-    type: 'manual',
-    createdBy: userId,
-  })
-
-  return {
-    name: normalized,
-    latestRevision: newVersion.revision,
-    latestVersionId: newVersion.id,
-    createdAt: newVersion.createdAt,
-    createdBy: userId,
-    createdByName: null,
   }
 }
 

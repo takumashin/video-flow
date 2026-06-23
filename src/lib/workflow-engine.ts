@@ -45,7 +45,7 @@ export function getOrderedUpstreamImageNodes(
   return ordered
 }
 
-/** 按连线顺序返回连到 Seedance 的上游视频节点 */
+/** 按连线顺序返回连到 Seedance 的上游视频节点（支持 VideoInput 和 Seedance 节点） */
 export function getOrderedUpstreamVideoNodes(
   seedanceNodeId: string,
   nodes: WorkflowNode[],
@@ -60,8 +60,18 @@ export function getOrderedUpstreamVideoNodes(
     if (seen.has(edge.source))
       continue
     const source = nodes.find(node => node.id === edge.source)
-    if (source?.data.type !== NodeType.VideoInput)
+    if (!source)
       continue
+    // 支持 VideoInput 节点和 Seedance 节点（用于续写功能）
+    if (source.data.type !== NodeType.VideoInput && source.data.type !== NodeType.Seedance)
+      continue
+    // 对于 Seedance 节点，必须有可用的视频
+    if (source.data.type === NodeType.Seedance) {
+      const seedanceData = source.data
+      const hasVideo = seedanceData.videoUrl || (seedanceData.videoHistory && seedanceData.videoHistory.length > 0)
+      if (!hasVideo)
+        continue
+    }
     seen.add(source.id)
     ordered.push(source)
   }

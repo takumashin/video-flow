@@ -3,6 +3,7 @@
 import { FileAudio, FileVideo, Type, X } from 'lucide-react'
 import MediaPreviewImage from '@/components/media-preview-image'
 import { CompactImageUploadSlot } from '@/components/canvas/compact-image-upload-slot'
+import OmniReferenceMediaRow from '@/components/canvas/omni-reference-media-row'
 import { openMediaPreview } from '@/store/media-preview-store'
 import { getSeedanceModeInputRules } from '@/lib/seedance-connection-rules'
 import type { ImageRole, SeedanceGenerationMode } from '@/lib/types'
@@ -13,6 +14,7 @@ type SeedanceConnectedInputsProps = {
   refs: SeedanceUpstreamRefs
   mode: SeedanceGenerationMode
   disabled?: boolean
+  layout?: 'stack' | 'row'
   onRemoveImage: (imageNodeId: string) => void
   onRemoveVideo: (videoNodeId: string) => void
   onRemoveAudio: (audioNodeId: string) => void
@@ -78,6 +80,7 @@ export default function SeedanceConnectedInputs({
   refs,
   mode,
   disabled = false,
+  layout = 'stack',
   onRemoveImage,
   onRemoveVideo,
   onRemoveAudio,
@@ -86,6 +89,151 @@ export default function SeedanceConnectedInputs({
   const rules = getSeedanceModeInputRules(mode)
   const hasAnyMedia = refs.images.length > 0 || refs.videos.length > 0 || refs.audios.length > 0
   const showRole = shouldShowImageRoleInPreview(mode)
+
+  if (layout === 'row') {
+    if (mode === 'omni_reference') {
+      return (
+        <OmniReferenceMediaRow
+          seedanceNodeId={_seedanceNodeId}
+          refs={refs}
+          rules={rules}
+          disabled={disabled}
+          onRemoveImage={onRemoveImage}
+          onRemoveVideo={onRemoveVideo}
+          onRemoveAudio={onRemoveAudio}
+        />
+      )
+    }
+
+    if (mode === 'first_last_frame' && onUploadFrameImage) {
+      const firstFrame = findFrameImage(refs.images, 'first_frame')
+      const lastFrame = findFrameImage(refs.images, 'last_frame')
+
+      return (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <CompactImageUploadSlot
+            label="首帧"
+            badge="首"
+            variant="tile"
+            value={firstFrame?.imageUrl}
+            disabled={disabled}
+            onChange={imageUrl => onUploadFrameImage('first_frame', imageUrl)}
+            onClear={firstFrame ? () => onRemoveImage(firstFrame.nodeId) : undefined}
+          />
+          <CompactImageUploadSlot
+            label="尾帧"
+            badge="尾"
+            variant="tile"
+            value={lastFrame?.imageUrl}
+            disabled={disabled}
+            onChange={imageUrl => onUploadFrameImage('last_frame', imageUrl)}
+            onClear={lastFrame ? () => onRemoveImage(lastFrame.nodeId) : undefined}
+          />
+        </div>
+      )
+    }
+
+    if (!hasAnyMedia && mode === 'text_to_video') {
+      return null
+    }
+
+    if (!hasAnyMedia) {
+      return (
+        <p className="text-[11px] text-muted">{rules.hint}</p>
+      )
+    }
+
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {refs.images.map(image => (
+          <div
+            key={image.nodeId}
+            className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-muted"
+          >
+            <MediaPreviewImage
+              src={image.imageUrl}
+              alt={image.title}
+              title={`@图片${image.index}`}
+              imageClassName="h-full w-full object-cover"
+              showHint={false}
+            />
+            <div className="absolute left-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/55 text-[9px] font-semibold text-white">
+              {image.index}
+            </div>
+            <button
+              type="button"
+              disabled={disabled}
+              onPointerDown={e => e.stopPropagation()}
+              onClick={e => {
+                e.stopPropagation()
+                onRemoveImage(image.nodeId)
+              }}
+              className="nodrag absolute right-0.5 top-0.5 z-10 rounded bg-black/60 p-0.5 text-white opacity-0 transition group-hover:opacity-100 disabled:opacity-50"
+              aria-label={`移除 ${image.title}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+        {refs.videos.map(video => (
+          <div
+            key={video.nodeId}
+            className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-black"
+          >
+            <video
+              src={video.mediaUrl}
+              muted
+              playsInline
+              preload="metadata"
+              className="h-full w-full object-cover"
+              draggable={false}
+            />
+            <div className="absolute left-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/55 text-[9px] font-semibold text-white">
+              {video.index}
+            </div>
+            <button
+              type="button"
+              disabled={disabled}
+              onPointerDown={e => e.stopPropagation()}
+              onClick={e => {
+                e.stopPropagation()
+                onRemoveVideo(video.nodeId)
+              }}
+              className="nodrag absolute right-0.5 top-0.5 z-10 rounded bg-black/60 p-0.5 text-white opacity-0 transition group-hover:opacity-100"
+              aria-label={`移除 ${video.title}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+        {refs.audios.map(audio => (
+          <div
+            key={audio.nodeId}
+            className="group relative flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10"
+            title={audio.title}
+          >
+            <FileAudio className="h-5 w-5 text-emerald-500" />
+            <span className="mt-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">
+              音频{audio.index}
+            </span>
+            <button
+              type="button"
+              disabled={disabled}
+              onPointerDown={e => e.stopPropagation()}
+              onClick={e => {
+                e.stopPropagation()
+                onRemoveAudio(audio.nodeId)
+              }}
+              className="nodrag absolute right-0.5 top-0.5 rounded bg-black/60 p-0.5 text-white opacity-0 transition group-hover:opacity-100"
+              aria-label={`移除 ${audio.title}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+    )
+  }
 
   if (mode === 'first_last_frame' && onUploadFrameImage) {
     return (
@@ -98,6 +246,20 @@ export default function SeedanceConnectedInputs({
         />
         <SeedanceConnectedTextHint refs={refs} />
       </div>
+    )
+  }
+
+  if (mode === 'omni_reference') {
+    return (
+      <OmniReferenceMediaRow
+        seedanceNodeId={_seedanceNodeId}
+        refs={refs}
+        rules={rules}
+        disabled={disabled}
+        onRemoveImage={onRemoveImage}
+        onRemoveVideo={onRemoveVideo}
+        onRemoveAudio={onRemoveAudio}
+      />
     )
   }
 

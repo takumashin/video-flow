@@ -1,5 +1,6 @@
 import type {
   WorkflowBranch,
+  WorkflowBranchStatus,
   WorkflowDiffResult,
   WorkflowVersionDetail,
   WorkflowVersionSummary,
@@ -51,11 +52,12 @@ export async function saveNamedVersion(
   workflowId: string,
   label: string,
   description?: string,
+  branchName?: string,
 ): Promise<WorkflowVersionSummary> {
   const response = await fetch(`/api/workflows/${workflowId}/versions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label, description }),
+    body: JSON.stringify({ label, description, branchName }),
   })
 
   const data = await response.json()
@@ -113,8 +115,14 @@ export async function fetchVersionDiff(
 
 export async function fetchBranches(
   workflowId: string,
+  options?: { status?: WorkflowBranchStatus | 'all'; mine?: boolean },
 ): Promise<WorkflowBranch[]> {
-  const response = await fetch(`/api/workflows/${workflowId}/branches`)
+  const params = new URLSearchParams()
+  if (options?.status && options.status !== 'all') params.set('status', options.status)
+  if (options?.mine) params.set('mine', 'true')
+
+  const url = `/api/workflows/${workflowId}/branches${params.size > 0 ? `?${params.toString()}` : ''}`
+  const response = await fetch(url)
   const data = await response.json()
 
   if (!response.ok) {
@@ -127,12 +135,12 @@ export async function fetchBranches(
 export async function createWorkflowBranch(
   workflowId: string,
   name: string,
-  sourceVersionId: string,
+  options?: { description?: string; sourceVersionId?: string },
 ): Promise<WorkflowBranch> {
   const response = await fetch(`/api/workflows/${workflowId}/branches`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, sourceVersionId }),
+    body: JSON.stringify({ name, ...options }),
   })
 
   const data = await response.json()
@@ -144,11 +152,16 @@ export async function createWorkflowBranch(
   return data.branch as WorkflowBranch
 }
 
-// ---- Branch switching (client-side: load latest version for branch) ----
-
-export async function switchWorkflowBranch(
+export async function checkoutWorkflowBranch(
   workflowId: string,
-  branchName: string,
+  targetBranch: string,
+  fromBranch: string,
+  currentState: {
+    name: string
+    nodes: unknown[]
+    edges: unknown[]
+    revision: number
+  },
 ): Promise<{
   id: string
   name: string
@@ -156,23 +169,98 @@ export async function switchWorkflowBranch(
   edges: unknown[]
   revision: number
   branchName: string
-} | null> {
-  // Load the latest version for the target branch
-  const versions = await fetchWorkflowVersions(workflowId, {
-    branch: branchName,
-    limit: 1,
+  branchRevision: number
+}> {
+  const response = await fetch(`/api/workflows/${workflowId}/branches/checkout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      targetBranch,
+      fromBranch,
+      ...currentState,
+    }),
   })
 
-  if (versions.length === 0) return null
+  const data = await response.json()
 
-  const detail = await fetchWorkflowVersion(workflowId, versions[0].id)
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '切换分支失败')
+  }
 
-  return {
-    id: workflowId,
-    name: detail.name,
-    nodes: detail.nodes,
-    edges: detail.edges,
-    revision: detail.revision,
-    branchName: detail.branchName,
+  return data.workflow
+}
+
+export async function mergeWorkflowBranch(
+  workflowId: string,
+  branchName: string,
+): Promise<{
+  workflow: {
+    id: string
+    name: string
+    nodes: unknown[]
+    edges: unknown[]
+    revision: number
+  }
+}> {
+  const response = await fetch(
+    `/api/workflows/${workflowId}/branches/${encodeURIComponent(branchName)}/merge`,
+    { method: 'POST' },
+  )
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '合并分支失败')
+  }
+
+  return data
+}
+
+export async function archiveWorkflowBranch(
+  workflowId: string,
+  branchName: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/workflows/${workflowId}/branches/${encodeURIComponent(branchName)}/archive`,
+    { method: 'POST' },
+  )
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '归档分支失败')
+  }
+}
+
+export async function restoreWorkflowBranch(
+  workflowId: string,
+  branchName: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/workflows/${workflowId}/branches/${encodeURIComponent(branchName)}/restore`,
+    { method: 'POST' },
+  )
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '恢复分支失败')
+  }
+}
+
+export async function renameWorkflowBranch(
+  workflowId: string,
+  oldName: string,
+  newName: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/workflows/${workflowId}/branches/${encodeURIComponent(oldName)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newName }),
+    },
+  )
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : '重命名分支失败')
   }
 }

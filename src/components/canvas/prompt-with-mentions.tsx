@@ -27,6 +27,10 @@ type PromptWithMentionsProps = {
   mode?: SeedanceGenerationMode
   disabled?: boolean
   placeholder?: string
+  /** sidebar：右侧生成配置栏；wide：节点下方宽面板；modal：独立弹窗 */
+  variant?: 'default' | 'sidebar' | 'wide' | 'modal'
+  showLabel?: boolean
+  showCharCount?: boolean
 }
 
 export default function PromptWithMentions({
@@ -36,7 +40,14 @@ export default function PromptWithMentions({
   mode,
   disabled,
   placeholder,
+  variant = 'default',
+  showLabel,
+  showCharCount = false,
 }: PromptWithMentionsProps) {
+  const isSidebar = variant === 'sidebar'
+  const isWide = variant === 'wide'
+  const isModal = variant === 'modal'
+  const showFieldLabel = showLabel ?? (!isWide && !isModal)
   const editorRef = useRef<HTMLDivElement>(null)
   const isComposingRef = useRef(false)
   const skipExternalSyncRef = useRef(false)
@@ -314,20 +325,33 @@ export default function PromptWithMentions({
   const showPlaceholder = !localValue
 
   return (
-    <div className="space-y-2">
-      <FieldLabel>视频描述（在此编辑，输入 @ 引用图片）</FieldLabel>
+    <div className={cn('space-y-2', (isWide || isModal) && 'space-y-0')}>
+      {showFieldLabel && (
+        <FieldLabel>视频描述（在此编辑，输入 @ 引用图片）</FieldLabel>
+      )}
 
       <div className="relative">
         <div
           className={cn(
             'relative overflow-hidden rounded-md border border-border bg-input transition-[border-color,box-shadow]',
-            'focus-within:border-primary-light focus-within:ring-1 focus-within:ring-primary-light/30',
+            isWide
+              ? 'rounded-lg border-transparent bg-transparent focus-within:border-transparent focus-within:ring-0'
+              : isModal
+                ? 'rounded-xl focus-within:border-primary-light focus-within:ring-2 focus-within:ring-primary-light/25'
+                : 'focus-within:border-primary-light focus-within:ring-1 focus-within:ring-primary-light/30',
             disabled && 'opacity-50',
           )}
         >
           {showPlaceholder && (
             <p
-              className="pointer-events-none absolute left-2.5 top-1.5 text-[0.75rem] leading-[1.625] text-muted"
+              className={cn(
+                'pointer-events-none absolute leading-[1.625] text-muted',
+                isSidebar || isWide
+                  ? 'left-3 top-2.5 text-sm'
+                  : isModal
+                    ? 'left-3 top-3 text-sm'
+                    : 'left-2.5 top-1.5 text-[0.75rem]',
+              )}
               aria-hidden
             >
               {resolvedPlaceholder}
@@ -347,8 +371,12 @@ export default function PromptWithMentions({
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onBlur={() => setTimeout(closeMention, 150)}
-              className={cn(
-              'prompt-editor nodrag nowheel nokey cursor-text min-h-[7.5rem] w-full px-2.5 py-1.5 text-foreground outline-none',
+            className={cn(
+              'prompt-editor nodrag nowheel nokey cursor-text w-full text-foreground outline-none',
+              isSidebar && 'prompt-editor--sidebar px-3 py-2.5',
+              isWide && 'prompt-editor--wide px-3 py-2.5',
+              isModal && 'prompt-editor--modal px-3 py-3',
+              !isSidebar && !isWide && !isModal && 'px-2.5 py-1.5',
               disabled && 'cursor-not-allowed',
             )}
           />
@@ -431,7 +459,7 @@ export default function PromptWithMentions({
         )}
       </div>
 
-      {mediaOptions.length > 0 && (
+      {mediaOptions.length > 0 && !isWide && (
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
@@ -478,6 +506,12 @@ export default function PromptWithMentions({
             </button>
           ))}
         </div>
+      )}
+
+      {showCharCount && (
+        <p className="mt-1 text-right text-[10px] tabular-nums text-muted">
+          {localValue.length}/10000
+        </p>
       )}
     </div>
   )

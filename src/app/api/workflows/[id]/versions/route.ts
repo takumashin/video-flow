@@ -57,7 +57,7 @@ export async function POST(
     }
 
     const body = await request.json()
-    const { label, description } = body
+    const { label, description, branchName } = body
 
     if (!label || typeof label !== 'string' || !label.trim()) {
       return NextResponse.json({ error: '请提供版本标签' }, { status: 400 })
@@ -68,6 +68,7 @@ export async function POST(
       userId,
       label.trim(),
       description?.trim() || undefined,
+      typeof branchName === 'string' ? branchName : 'main',
     )
 
     return NextResponse.json({ version }, { status: 201 })

@@ -6,7 +6,7 @@ import { SiteLogo } from '@/components/site-logo'
 import WorkflowManager from '@/components/workflow-manager'
 import WorkflowCollaborators from '@/components/workflow-collaborators'
 import WorkspaceSwitcher from '@/components/workspace-switcher'
-import BranchSelector from '@/components/branch-selector'
+import WorkflowFileMenu from '@/components/workflow-file-menu'
 import { btnCompactClass } from '@/lib/ui-classes'
 import { useTaskQueueStore } from '@/store/task-queue-store'
 
@@ -24,7 +24,7 @@ export default function StudioHeader() {
 
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
         <WorkflowCollaborators />
-        <BranchSelector />
+        <WorkflowFileMenu />
         <WorkflowManager compact menuPlacement="below" />
         <button
           type="button"

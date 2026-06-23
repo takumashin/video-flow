@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { History, Loader2, Play, Square } from 'lucide-react'
+import { History, Loader2, Play, Square, ArrowUp, Zap } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { SeedanceNodeData, WorkflowEdge, WorkflowNode } from '@/lib/types'
 import {
   getModelOption,
   getRecommendedModelForModeChange,
+  getSeedanceGenerationCreditCost,
   shouldDisableAudio,
 } from '@/lib/seedance-models'
 import { getSeedanceUpstreamRefs } from '@/lib/seedance-upstream'
@@ -85,11 +86,13 @@ export function SeedanceGenerateButton({
   data,
   nodes,
   edges,
+  layout = 'full',
 }: {
   id: string
   data: SeedanceNodeData
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  layout?: 'full' | 'compact'
 }) {
   const activeSessionId = useWorkflowStore(s => s.activeSessionId)
   const cancelSeedanceNode = useWorkflowStore(s => s.cancelSeedanceNode)
@@ -116,6 +119,61 @@ export function SeedanceGenerateButton({
     finally {
       setCancelling(false)
     }
+  }
+
+  const creditCost = getSeedanceGenerationCreditCost(
+    data.model,
+    data.resolution ?? '720p',
+  )
+
+  if (layout === 'compact') {
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-2">
+          {!isGenerating && (
+            <span className="inline-flex items-center gap-1 text-[11px] tabular-nums text-muted">
+              <Zap className="h-3.5 w-3.5" />
+              {creditCost}
+            </span>
+          )}
+          {canCancel && (
+            <button
+              type="button"
+              disabled={cancelling}
+              onClick={() => void handleCancel()}
+              className="nodrag inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 text-red-500 transition hover:bg-red-500/15 disabled:opacity-60"
+              title="取消生成"
+            >
+              {cancelling
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Square className="h-3.5 w-3.5 fill-current" />}
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={(isGenerating && isJobActive) || cancelling || !canSubmit}
+            onClick={() => {
+              const store = useWorkflowStore.getState()
+              if (isStuckGenerating)
+                void store.resumeSeedanceNode(id)
+              else
+                void store.runSeedanceNode(id)
+            }}
+            className="nodrag inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary text-white shadow-sm transition hover:bg-[#104BD4] disabled:cursor-not-allowed disabled:opacity-60"
+            title={isGenerating ? generatingLabel : '生成视频'}
+          >
+            {isStuckGenerating
+              ? <Play className="h-4 w-4" />
+              : isGenerating
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <ArrowUp className="h-4 w-4" />}
+          </button>
+        </div>
+        {cancelError && (
+          <p className="max-w-[12rem] text-right text-[10px] text-red-600 dark:text-red-400">{cancelError}</p>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -187,7 +245,7 @@ function SeedanceLatestVideo({
         <p className="text-[10px] font-medium text-muted">{previousLabel}</p>
       )}
       {!embedded && <NodeVideoPlayer src={videoUrl} />}
-      <div className="flex items-center justify-between gap-2 px-0.5">
+      <div className="nodrag flex items-center justify-between gap-2 px-0.5">
         <button
           type="button"
           className="nodrag inline-flex items-center gap-1 text-[11px] font-medium text-primary-light hover:underline"
@@ -199,7 +257,7 @@ function SeedanceLatestVideo({
         <VideoDownloadLink
           videoUrl={videoUrl}
           taskId={taskId}
-          className="text-[11px] font-medium text-muted hover:text-primary-light hover:underline"
+          className="nodrag text-[11px] font-medium text-muted hover:text-primary-light hover:underline"
           showIcon={false}
         />
       </div>
@@ -235,7 +293,12 @@ function SeedanceNodeMediaSlot({
 
   return (
     <div className="space-y-2">
-      <div className="relative aspect-video w-full overflow-hidden rounded-md bg-surface-muted">
+      <div
+        className={cn(
+          'relative aspect-video w-full overflow-hidden rounded-md bg-black',
+          latestVideo && !showLoading && 'cursor-grab active:cursor-grabbing',
+        )}
+      >
         {latestVideo && (
           <div
             className={cn(
@@ -245,6 +308,9 @@ function SeedanceNodeMediaSlot({
           >
             <NodeVideoPlayer
               src={latestVideo}
+              variant="node"
+              showExpand={false}
+              showScreenshot
               className="h-full min-h-0 rounded-none !aspect-auto"
             />
           </div>
@@ -317,7 +383,7 @@ export function SeedanceNodeSummary({
             <p className="line-clamp-2 text-xs leading-relaxed text-secondary">{prompt}</p>
           )
         : (
-            <p className="text-xs text-muted">尚未填写提示词</p>
+            <p className="text-xs text-muted/70">—</p>
           )}
 
       <SeedanceNodeMediaSlot
@@ -352,10 +418,7 @@ export function SeedanceNodeSummary({
       )}
 
       {!selected && !isGenerating && (
-        <p className="text-[10px] text-muted/80">选中节点后，在右侧栏配置并生成视频</p>
-      )}
-      {selected && !isGenerating && (
-        <p className="text-[10px] text-muted/80">在右侧栏点击「生成视频」</p>
+        <p className="text-[10px] text-muted/80">选中后在下方配置</p>
       )}
     </div>
   )
@@ -369,7 +432,7 @@ export function SeedanceNodeDetailPanel({
   edges,
   className,
   variant = 'floating',
-}: SeedancePanelProps & { className?: string; variant?: 'floating' | 'sidebar' }) {
+}: SeedancePanelProps & { className?: string; variant?: 'floating' | 'sidebar' | 'below' }) {
   const updateNodeData = useWorkflowStore(s => s.updateNodeData)
   const pruneSeedanceEdgesForMode = useWorkflowStore(s => s.pruneSeedanceEdgesForMode)
   const upstreamRefs = getSeedanceUpstreamRefs(id, nodes, edges)
@@ -384,9 +447,9 @@ export function SeedanceNodeDetailPanel({
           : 'nodrag rounded-xl border border-primary-light/40 bg-surface px-3 py-2.5 shadow-lg ring-2 ring-primary-light/15',
         className,
       )}
-      onPointerDown={variant === 'floating' ? e => e.stopPropagation() : undefined}
+      onPointerDown={variant !== 'sidebar' ? e => e.stopPropagation() : undefined}
     >
-      {variant === 'floating' && (
+      {variant !== 'sidebar' && (
         <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted">
           生成配置
         </p>
@@ -399,6 +462,7 @@ export function SeedanceNodeDetailPanel({
           refs={upstreamRefs}
           mode={data.generationMode ?? 'text_to_video'}
           disabled={disabled}
+          variant={variant === 'sidebar' || variant === 'below' ? 'sidebar' : 'default'}
         />
         <SeedanceConnectedInputs
           seedanceNodeId={id}

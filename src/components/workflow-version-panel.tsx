@@ -76,7 +76,7 @@ export default function WorkflowVersionPanel() {
   const openDiffViewer = useWorkflowVersionStore(s => s.openDiffViewer)
   const selectForCompare = useWorkflowVersionStore(s => s.selectForCompare)
   const restoreVersion = useWorkflowVersionStore(s => s.restoreVersion)
-  const setActiveBranchAndReload = useWorkflowVersionStore(s => s.setActiveBranch)
+  const checkoutBranch = useWorkflowVersionStore(s => s.checkoutBranch)
   const branches = useWorkflowVersionStore(s => s.branches)
   const clearError = useWorkflowVersionStore(s => s.clearError)
   const createBranchFromStore = useWorkflowVersionStore(s => s.createBranch)
@@ -141,14 +141,30 @@ export default function WorkflowVersionPanel() {
     setRestoringId(null)
   }
 
-  const handleBranchSwitch = (branch: string) => {
-    if (branch === activeBranch) return
-    setActiveBranchAndReload(branch)
+  const handleBranchSwitch = async (branch: string) => {
+    if (branch === activeBranch || !activeSession) return
+    await checkoutBranch(
+      workflowId,
+      activeSession.id,
+      branch,
+      {
+        name: activeSession.name,
+        nodes: activeSession.nodes,
+        edges: activeSession.edges,
+        revision: activeSession.revision ?? 0,
+      },
+    )
+    void loadVersions(workflowId)
   }
 
   const handleCreateBranch = async () => {
-    if (!newBranchName.trim() || !selectedForCompare) return
-    await createBranchFromStore(workflowId, newBranchName.trim(), selectedForCompare)
+    if (!newBranchName.trim()) return
+    await createBranchFromStore(
+      workflowId,
+      newBranchName.trim(),
+      undefined,
+      selectedForCompare ?? undefined,
+    )
     setNewBranchName('')
     setBranchInputOpen(false)
     selectForCompare(null)

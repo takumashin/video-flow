@@ -31,7 +31,7 @@ export async function PUT(
     const { workspaceId } = await requireAuth()
     const { id } = await params
     const body = await request.json()
-    const { name, nodes, edges, expectedRevision, force } = body
+    const { name, nodes, edges, expectedRevision, force, branchName } = body
 
     if (nodes !== undefined && !Array.isArray(nodes)) {
       return NextResponse.json({ error: '节点数据格式无效' }, { status: 400 })
@@ -47,6 +47,7 @@ export async function PUT(
       edges: edges as WorkflowEdge[] | undefined,
       expectedRevision: typeof expectedRevision === 'number' ? expectedRevision : undefined,
       force: force === true,
+      branchName: typeof branchName === 'string' ? branchName : 'main',
     })
 
     if (!result) {

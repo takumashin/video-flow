@@ -4,7 +4,6 @@ import { ReactFlowProvider } from 'reactflow'
 import WorkflowCanvas from '@/components/canvas/workflow-canvas'
 import AssetLibrarySidebar from '@/components/asset-library-sidebar'
 import AssetLibraryToggle from '@/components/asset-library-toggle'
-import SeedanceConfigSidebar from '@/components/seedance-config-sidebar'
 import { useAssetLibraryStore } from '@/store/asset-library-store'
 
 export default function StudioWorkspace() {
@@ -18,7 +17,6 @@ export default function StudioWorkspace() {
           {!isAssetLibraryOpen && <AssetLibraryToggle />}
           <WorkflowCanvas />
         </div>
-        <SeedanceConfigSidebar />
       </div>
     </ReactFlowProvider>
   )

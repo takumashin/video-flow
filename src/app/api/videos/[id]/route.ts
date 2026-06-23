@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { authErrorResponse, requireAuth } from '@/lib/auth/context'
+import { createByteRangeResponse } from '@/lib/http-byte-range'
 import { buildVideoDownloadFilename } from '@/lib/video-download'
 import { getMimeTypeFromVideoFilename, readVideo } from '@/lib/video-storage'
 
@@ -26,7 +27,6 @@ export async function GET(
     const mimeType = getMimeTypeFromVideoFilename(id)
     const headers: Record<string, string> = {
       'Content-Type': mimeType,
-      'Content-Length': String(file.buffer.length),
     }
 
     if (download) {
@@ -38,7 +38,7 @@ export async function GET(
       headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     }
 
-    return new NextResponse(new Uint8Array(file.buffer), { headers })
+    return createByteRangeResponse(file.buffer, request, headers)
   }
   catch (error) {
     return authErrorResponse(error)

@@ -132,7 +132,7 @@ export type WorkflowSummary = Pick<SavedWorkflow, 'id' | 'name' | 'createdAt' | 
 
 // ---- Workflow Version Management ----
 
-export type WorkflowVersionType = 'auto' | 'manual' | 'restore'
+export type WorkflowVersionType = 'auto' | 'manual' | 'restore' | 'merge'
 
 export type WorkflowVersionSummary = {
   id: string
@@ -171,13 +171,19 @@ export type WorkflowDiffResult = {
   edgeChanges: WorkflowDiffEntry[]
 }
 
+export type WorkflowBranchStatus = 'active' | 'archived' | 'merged'
+
 export type WorkflowBranch = {
   name: string
+  status: WorkflowBranchStatus
+  isMain: boolean
   latestRevision: number
   latestVersionId: string
   createdAt: number
+  updatedAt: number
   createdBy: string | null
   createdByName: string | null
+  description: string | null
 }
 
 export type ImageContentItem = {

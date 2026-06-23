@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server'
 import { authErrorResponse, requireAuth } from '@/lib/auth/context'
 import { getWorkflow } from '@/lib/workflow-storage'
-import { createBranch, listBranches } from '@/lib/workflow-versions-storage'
+import { listBranches, createBranchFromCurrent } from '@/lib/workflow-branches-storage'
 
 // GET /api/workflows/[id]/branches — list branches
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { workspaceId } = await requireAuth()
+    const { userId, workspaceId } = await requireAuth()
     const { id: workflowId } = await params
 
     const workflow = await getWorkflow(workflowId, workspaceId)
@@ -17,7 +17,14 @@ export async function GET(
       return NextResponse.json({ error: '工作流不存在' }, { status: 404 })
     }
 
-    const branches = await listBranches(workflowId)
+    const url = new URL(request.url)
+    const status = url.searchParams.get('status') as 'active' | 'archived' | 'merged' | 'all' | null
+    const mine = url.searchParams.get('mine') === 'true'
+
+    const branches = await listBranches(workflowId, {
+      userId: mine ? userId : undefined,
+      status: status ?? 'all',
+    })
     return NextResponse.json({ branches })
   }
   catch (error) {
@@ -40,21 +47,20 @@ export async function POST(
     }
 
     const body = await request.json()
-    const { name, sourceVersionId } = body
+    const { name, description, sourceVersionId } = body
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return NextResponse.json({ error: '请提供分支名称' }, { status: 400 })
     }
 
-    if (!sourceVersionId || typeof sourceVersionId !== 'string') {
-      return NextResponse.json({ error: '请提供源版本 ID' }, { status: 400 })
-    }
-
-    const branch = await createBranch(
+    const branch = await createBranchFromCurrent(
       workflowId,
       name.trim(),
-      sourceVersionId,
       userId,
+      {
+        description: typeof description === 'string' ? description.trim() : undefined,
+        sourceVersionId: typeof sourceVersionId === 'string' ? sourceVersionId : undefined,
+      },
     )
 
     return NextResponse.json({ branch }, { status: 201 })

@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { v4 as uuidv4 } from 'uuid'
-import { eq, or } from 'drizzle-orm'
+import { desc, eq, or } from 'drizzle-orm'
 import { db } from '@/db'
-import { generatedVideos } from '@/db/schema'
+import { generatedVideos, seedanceTasks } from '@/db/schema'
 import { extractVideoId, isLocalVideoUrl, VIDEO_ID_PATTERN } from './video-url'
 
 export { extractVideoId, isLocalVideoUrl, VIDEO_ID_PATTERN } from './video-url'
@@ -119,4 +119,45 @@ export async function readVideo(
   catch {
     return null
   }
+}
+
+export async function readVideoAsDataUrl(filename: string): Promise<string | null> {
+  const file = await readVideo(filename)
+  if (!file)
+    return null
+  const base64 = file.buffer.toString('base64')
+  return `data:${file.mimeType};base64,${base64}`
+}
+
+/** 本地 `/api/videos/{id}` 对应 Seedance 返回的远程 TOS 地址，供 reference_video 提交使用 */
+export async function getRemoteVideoUrlForLocalVideo(filename: string): Promise<string | null> {
+  const video = await findVideoByFilename(filename)
+  if (!video)
+    return null
+
+  const localPath = `/api/videos/${video.filename}`
+
+  if (video.sourceTaskId) {
+    const [task] = await db
+      .select({ remoteVideoUrl: seedanceTasks.remoteVideoUrl })
+      .from(seedanceTasks)
+      .where(or(
+        eq(seedanceTasks.taskId, video.sourceTaskId),
+        eq(seedanceTasks.apiTaskId, video.sourceTaskId),
+      ))
+      .limit(1)
+
+    const remote = task?.remoteVideoUrl?.trim()
+    if (remote)
+      return remote
+  }
+
+  const [taskByLocalUrl] = await db
+    .select({ remoteVideoUrl: seedanceTasks.remoteVideoUrl })
+    .from(seedanceTasks)
+    .where(eq(seedanceTasks.videoUrl, localPath))
+    .orderBy(desc(seedanceTasks.updatedAt))
+    .limit(1)
+
+  return taskByLocalUrl?.remoteVideoUrl?.trim() || null
 }

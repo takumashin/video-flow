@@ -220,7 +220,7 @@ async function pollAndCompleteSeedanceTask(
     const saveResponse = await fetch('/api/videos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sourceUrl: finalVideoUrl }),
+      body: JSON.stringify({ sourceUrl: finalVideoUrl, sourceTaskId: taskId }),
       signal,
     })
     const saveResult = await saveResponse.json()
@@ -336,6 +336,7 @@ export async function runSeedanceNodeSession(
       progressStartedAt: undefined,
       taskStatus: undefined,
       queuePosition: undefined,
+      taskId: undefined,
     })
     deps.addLog({
       nodeId: seedanceNodeId,
@@ -412,6 +413,9 @@ export async function runSeedanceNodeSession(
       status: 'failed',
       progress: 0,
       progressStartedAt: undefined,
+      taskStatus: undefined,
+      queuePosition: undefined,
+      taskId: undefined,
       error: createErrorMessage,
     })
     deps.addLog({
@@ -488,10 +492,20 @@ export function handleSeedanceSessionError(
   options: RunSeedanceOptions,
 ) {
   if (isAbortError(error)) {
+    const currentNode = deps.getNodes().find(node => node.id === nodeId)
+    if (
+      currentNode?.data.type === NodeType.Seedance
+      && currentNode.data.status === 'failed'
+    ) {
+      return
+    }
+
     deps.updateNodeData(nodeId, {
       status: 'idle',
       progress: undefined,
       progressStartedAt: undefined,
+      taskStatus: undefined,
+      queuePosition: undefined,
       error: undefined,
     })
     deps.addLog({
@@ -512,6 +526,8 @@ export function handleSeedanceSessionError(
     status: 'failed',
     progress: undefined,
     progressStartedAt: undefined,
+    taskStatus: undefined,
+    queuePosition: undefined,
     error: message,
   })
   deps.addLog({

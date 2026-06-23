@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(ps -o pid,ppid,cmd -p 513633)",
+      "Bash(pstree -p -s 513633)",
+      "Bash(ps -o pid,ppid,cmd -p 456902)",
+      "Bash(pm2 list *)",
+      "Bash(pm2 restart *)",
+      "Bash(pm2 logs *)"
+    ]
+  }
+}

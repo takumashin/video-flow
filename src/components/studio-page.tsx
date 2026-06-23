@@ -16,6 +16,8 @@ import SeedanceJobRecovery from '@/components/seedance-job-recovery'
 import WorkflowTabs from '@/components/workflow-tabs'
 import WorkflowVersionPanel from '@/components/workflow-version-panel'
 import WorkflowVersionDiff from '@/components/workflow-version-diff'
+import WorkflowBranchesModal from '@/components/workflow-branches-modal'
+import WorkflowMergeModal from '@/components/workflow-merge-modal'
 import WorkflowVersionSaveDialog from '@/components/workflow-version-save-dialog'
 
 const HEADER_HEIGHT = '3rem' /* h-12 */
@@ -38,6 +40,8 @@ export default function StudioPage() {
       <MediaPreviewModal />
       <TaskQueuePanel />
       <WorkflowVersionPanel />
+      <WorkflowBranchesModal />
+      <WorkflowMergeModal />
       <WorkflowVersionDiff />
       <WorkflowVersionSaveDialog />
       <WorkflowAutoSave />

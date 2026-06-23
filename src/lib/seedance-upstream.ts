@@ -73,6 +73,8 @@ export function resolveUpstreamImageRole(
 ): ImageRole {
   switch (mode) {
     case 'first_last_frame':
+      if (storedRole === 'first_frame' || storedRole === 'last_frame')
+        return storedRole
       if (orderIndex === 1)
         return 'first_frame'
       if (orderIndex === 2)
@@ -154,15 +156,35 @@ export function getSeedanceUpstreamRefs(
 
   const orderedVideos = getOrderedUpstreamVideoNodes(seedanceNodeId, nodes, edges)
   for (const node of orderedVideos) {
-    if (node.data.type !== NodeType.VideoInput || !node.data.mediaUrl.trim())
+    // 处理 VideoInput 节点
+    if (node.data.type === NodeType.VideoInput && node.data.mediaUrl.trim()) {
+      videoIndex += 1
+      videos.push({
+        nodeId: node.id,
+        title: node.data.title,
+        mediaUrl: node.data.mediaUrl.trim(),
+        index: videoIndex,
+      })
       continue
-    videoIndex += 1
-    videos.push({
-      nodeId: node.id,
-      title: node.data.title,
-      mediaUrl: node.data.mediaUrl.trim(),
-      index: videoIndex,
-    })
+    }
+    // 处理 Seedance 节点（续写功能）
+    if (node.data.type === NodeType.Seedance) {
+      const seedanceData = node.data
+      // 优先使用 videoUrl，否则使用 videoHistory 中最新的视频
+      let videoUrl = seedanceData.videoUrl
+      if (!videoUrl && seedanceData.videoHistory && seedanceData.videoHistory.length > 0) {
+        videoUrl = seedanceData.videoHistory[0].videoUrl
+      }
+      if (videoUrl && videoUrl.trim()) {
+        videoIndex += 1
+        videos.push({
+          nodeId: node.id,
+          title: seedanceData.title || 'Seedance 生成视频',
+          mediaUrl: videoUrl.trim(),
+          index: videoIndex,
+        })
+      }
+    }
   }
 
   const orderedAudios = getOrderedUpstreamAudioNodes(seedanceNodeId, nodes, edges)

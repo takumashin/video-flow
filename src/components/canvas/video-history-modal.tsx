@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Clock, Film, X } from 'lucide-react'
+import { Clock, Film, Link2, X } from 'lucide-react'
 import VideoDownloadLink from '@/components/video-download-link'
 import NodeVideoPlayer from '@/components/canvas/node-video-player'
 import { VideoFirstFrameThumb } from '@/components/canvas/video-first-frame-thumb'
@@ -27,6 +27,7 @@ export default function VideoHistoryModal() {
   const nodeId = activeSession?.videoHistoryModalNodeId
   const nodes = activeSession?.nodes ?? []
   const closeVideoHistoryModal = useWorkflowStore(s => s.closeVideoHistoryModal)
+  const useSeedanceVideoAsReference = useWorkflowStore(s => s.useSeedanceVideoAsReference)
   const node = nodes.find(n => n.id === nodeId)
   const history = node?.data.type === NodeType.Seedance
     ? (node.data.videoHistory ?? [])
@@ -128,12 +129,27 @@ export default function VideoHistoryModal() {
                             </p>
                           )}
                         </div>
-                        <VideoDownloadLink
-                          videoUrl={selected.videoUrl}
-                          taskId={selected.taskId}
-                          createdAt={selected.createdAt}
-                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20"
-                        />
+                        <div className="flex shrink-0 items-center gap-2">
+                          {node.data.type === NodeType.Seedance && (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-primary-light/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary-light hover:bg-primary/15"
+                              onClick={() => {
+                                useSeedanceVideoAsReference(nodeId, selected.videoUrl)
+                                closeVideoHistoryModal()
+                              }}
+                            >
+                              <Link2 className="h-3.5 w-3.5" />
+                              设为参考
+                            </button>
+                          )}
+                          <VideoDownloadLink
+                            videoUrl={selected.videoUrl}
+                            taskId={selected.taskId}
+                            createdAt={selected.createdAt}
+                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20"
+                          />
+                        </div>
                       </div>
                     </>
                   )}
